@@ -2,6 +2,18 @@
 
 Audio and color recording system with WiFi playback.
 
+## Quick Start
+
+```bash
+git clone https://github.com/YOUR_USERNAME/memory-bottle.git
+cd memory-bottle
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Then configure WiFi and upload sketches (see Setup below).
+
 ## System Components
 
 1. **Nano ESP32** (in bottle) - Records audio/color to SD card
@@ -57,16 +69,9 @@ memory-bottle/
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Install Arduino Libraries
 
-**Python:**
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-**Arduino libraries** (via Library Manager):
+Via Arduino IDE Library Manager:
 - Adafruit_NeoPixel
 - Adafruit_TCS34725
 
@@ -89,7 +94,7 @@ const char* serverURL = "http://YOUR_LAPTOP_IP:5000/upload";
 1. Upload `bottle-recorder.ino` to **Nano ESP32**
 2. Upload `bottle-playback.ino` to **UNO R4 Minima**
 
-### 4. Run Server
+### 4. Start Server
 
 ```bash
 source venv/bin/activate  # On Windows: venv\Scripts\activate
