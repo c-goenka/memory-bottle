@@ -12,9 +12,14 @@ Audio and color recording system with WiFi playback.
 
 ```
 memory-bottle/
-├── bottle-recorder/bottle-recorder.ino    # Nano ESP32
-├── bottle-playback/bottle-playback.ino    # UNO R4
+├── bottle-recorder/bottle-recorder.ino    # Nano ESP32 main
+├── bottle-playback/bottle-playback.ino    # UNO R4 main
 ├── bottle-server.py                       # Flask server
+├── debug-sketches/                        # Hardware testing
+│   ├── debug-nano-esp32.ino              #   Test ESP32 sensors
+│   └── debug-uno-r4.ino                  #   Test UNO R4
+├── debug-system.py                        # System testing
+├── DEBUG-GUIDE.md                         # Full debug reference
 ├── requirements.txt
 └── README.md
 ```
@@ -140,13 +145,31 @@ IDLE (memory cleared)
 **WiFi:** HTTP POST multipart/form-data, 30s timeout
 **Timing:** 50ms debounce, 100ms tilt stabilization
 
-## Troubleshooting
+## Debugging
+
+**Quick Start:** Run `python debug-system.py` to test everything
+
+**Full Guide:** See [DEBUG-GUIDE.md](DEBUG-GUIDE.md) for detailed troubleshooting
+
+### Debug Scripts
+
+**1. System Check:** `python debug-system.py`
+- Tests Python, network, serial, files, WiFi config
+
+**2. ESP32 Hardware:** Upload `debug-sketches/debug-nano-esp32.ino` (Serial: 115200)
+- Tests all sensors: LEDs, button, tilt, pot, mic, color, SD, WiFi
+
+**3. UNO R4 Hardware:** Upload `debug-sketches/debug-uno-r4.ino` (Serial: 115200)
+- Tests LEDs, serial, I2S, playback protocol
+
+### Common Issues
 
 **WiFi won't connect** - Use 2.4GHz network, check credentials
 **SD card error** - Format as FAT32, check SPI wiring
 **No audio playback** - Verify I2S wiring, check Serial Monitor
 **Server can't find Arduino** - Check USB connection, set `SERIAL_PORT` manually in script
 **Color sensor fails** - Verify I2C + level shifter, test with bright colors
+**LEDs not working** - Check power, verify D6 connection, test with debug sketch
 
 ## Sensor Selection
 
