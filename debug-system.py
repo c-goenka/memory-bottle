@@ -42,8 +42,8 @@ def test_python_version():
 def test_dependencies():
     print_header("2. Python Dependencies")
 
-    required = ['flask', 'serial']
-    packages = ['Flask', 'pyserial']
+    required = ['flask', 'serial', 'pygame']
+    packages = ['Flask', 'pyserial', 'pygame']
 
     missing = []
     for module, package in zip(required, packages):

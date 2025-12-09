@@ -17,8 +17,8 @@ Then configure WiFi and upload sketches (see Setup below).
 ## System Components
 
 1. **Nano ESP32** (in bottle) - Records audio/color to SD card
-2. **Python Server** (laptop) - Receives files via WiFi
-3. **UNO R4 Minima** (laptop) - Plays audio and displays color
+2. **Python Server** (laptop) - Receives files via WiFi, plays audio
+3. **UNO R4 Minima** (laptop) - Displays color on LED ring
 
 ## Files
 
@@ -47,11 +47,9 @@ memory-bottle/
 - **D10** → SD Card CS
 - **SDA/SCL** → TCS34725 Color Sensor (with 3.3V level shifter)
 
-### UNO R4 (Playback)
-- **D6** → NeoPixel LED Ring
-- **D9** → MAX98357 BCLK
-- **D10** → MAX98357 LRC
-- **D11** → MAX98357 DIN
+### UNO R4 Minima (Color Display)
+- **D6** → NeoPixel LED Ring (15 LEDs)
+- **USB** → Serial connection to laptop
 
 ## LED Status (State Debugging)
 
@@ -116,7 +114,7 @@ Server displays local IP - update ESP32 sketch if needed.
 
 ### Playback
 
-**Open cap + tilt bottle** (when green) → Transfers via WiFi, plays on UNO R4
+**Open cap + tilt bottle** (when green) → Transfers via WiFi, plays audio on laptop, displays color on UNO R4
 
 After playback, memory clears and returns to IDLE (dim white).
 
@@ -145,14 +143,16 @@ IDLE (memory cleared)
 
 ## Technical Specs
 
-**Audio:** 16kHz, 16-bit PCM, mono WAV (15s max)
-**Color:** RGB text file, format `R,G,B` (0-255)
+**Audio:** 16kHz, 16-bit PCM, mono WAV (15s max) - plays through laptop speakers via pygame
+**Color:** RGB text file, format `R,G,B` (0-255) - displays on UNO R4 LED ring
 **WiFi:** HTTP POST multipart/form-data, 30s timeout
 **Timing:** 50ms debounce, 100ms tilt stabilization
 
 ## Debugging
 
 **Quick Start:** Run `python debug-system.py` to test everything
+
+**Test Mode:** See [TEST-MODE-GUIDE.md](TEST-MODE-GUIDE.md) to test the full system without sensors (using Serial commands)
 
 **Full Guide:** See [DEBUG-GUIDE.md](DEBUG-GUIDE.md) for detailed troubleshooting
 
@@ -165,13 +165,13 @@ IDLE (memory cleared)
 - Tests all sensors: LEDs, button, tilt, pot, mic, color, SD, WiFi
 
 **3. UNO R4 Hardware:** Upload `debug-sketches/debug-uno-r4.ino` (Serial: 115200)
-- Tests LEDs, serial, I2S, playback protocol
+- Tests LEDs, serial, color display protocol
 
 ### Common Issues
 
 **WiFi won't connect** - Use 2.4GHz network, check credentials
 **SD card error** - Format as FAT32, check SPI wiring
-**No audio playback** - Verify I2S wiring, check Serial Monitor
+**No audio playback** - Check laptop speakers, verify pygame installed (`pip install pygame`)
 **Server can't find Arduino** - Check USB connection, set `SERIAL_PORT` manually in script
 **Color sensor fails** - Verify I2C + level shifter, test with bright colors
 **LEDs not working** - Check power, verify D6 connection, test with debug sketch

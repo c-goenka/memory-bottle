@@ -1,6 +1,7 @@
 /*
  * Memory Bottle - UNO R4 Minima Hardware Debug
  * Tests LED strip and serial communication
+ * (Audio plays through laptop speakers, not UNO R4)
  *
  * Upload to UNO R4 Minima and open Serial Monitor at 115200 baud
  */
@@ -9,9 +10,6 @@
 
 // Pin Definitions
 #define LED_PIN 6
-#define I2S_BCLK 9    // Bit Clock
-#define I2S_LRC 10    // Left/Right Clock (Word Select)
-#define I2S_DIN 11    // Data In
 
 // Configuration
 #define NUM_LEDS 15
@@ -25,12 +23,8 @@ void setup() {
 
   Serial.println("\n\n================================");
   Serial.println("  UNO R4 MINIMA HARDWARE DEBUG");
+  Serial.println("  (Color display only)");
   Serial.println("================================\n");
-
-  // Initialize I2S pins
-  pinMode(I2S_BCLK, OUTPUT);
-  pinMode(I2S_LRC, OUTPUT);
-  pinMode(I2S_DIN, OUTPUT);
 
   printMenu();
 }
@@ -47,10 +41,8 @@ void loop() {
     } else if (cmd == "2") {
       testSerial();
     } else if (cmd == "3") {
-      testI2SPins();
-    } else if (cmd == "4") {
       testPlaybackProtocol();
-    } else if (cmd == "5") {
+    } else if (cmd == "4") {
       testAllPatterns();
     } else if (cmd.startsWith("COLOR:")) {
       // Manual color test: COLOR:255,128,0
@@ -69,9 +61,8 @@ void printMenu() {
   Serial.println("================================");
   Serial.println("1 - LED Strip Test");
   Serial.println("2 - Serial Communication Test");
-  Serial.println("3 - I2S Pin Test");
-  Serial.println("4 - Playback Protocol Test");
-  Serial.println("5 - All LED Patterns");
+  Serial.println("3 - Color Display Protocol Test");
+  Serial.println("4 - All LED Patterns");
   Serial.println("COLOR:R,G,B - Custom Color (e.g., COLOR:255,0,0)");
   Serial.println("0 - Show Menu");
   Serial.println("================================\n");
@@ -160,47 +151,10 @@ void testSerial() {
   printMenu();
 }
 
-void testI2SPins() {
-  Serial.println(">>> I2S PIN TEST");
-  Serial.println("Testing I2S output pins...");
-  Serial.println("(Note: This only tests pin control, not actual audio)");
-  Serial.println();
-
-  pinMode(I2S_BCLK, OUTPUT);
-  pinMode(I2S_LRC, OUTPUT);
-  pinMode(I2S_DIN, OUTPUT);
-
-  Serial.println("Toggling I2S pins for 3 seconds...");
-  Serial.println("Use multimeter/oscilloscope to verify:");
-  Serial.println("  BCLK (D9)  - Should toggle");
-  Serial.println("  LRC  (D10) - Should toggle");
-  Serial.println("  DIN  (D11) - Should toggle");
-  Serial.println();
-
-  unsigned long startTime = millis();
-  bool state = false;
-
-  while (millis() - startTime < 3000) {
-    digitalWrite(I2S_BCLK, state);
-    digitalWrite(I2S_LRC, state);
-    digitalWrite(I2S_DIN, state);
-    state = !state;
-    delayMicroseconds(100);
-  }
-
-  // Set all low
-  digitalWrite(I2S_BCLK, LOW);
-  digitalWrite(I2S_LRC, LOW);
-  digitalWrite(I2S_DIN, LOW);
-
-  Serial.println("✓ I2S pin test complete");
-  Serial.println("Pins should have toggled.\n");
-  printMenu();
-}
-
 void testPlaybackProtocol() {
-  Serial.println(">>> PLAYBACK PROTOCOL TEST");
+  Serial.println(">>> COLOR DISPLAY PROTOCOL TEST");
   Serial.println("This simulates the server communication protocol.");
+  Serial.println("(Audio plays on laptop speakers, not UNO R4)");
   Serial.println();
 
   // Step 1: Wait for PLAY:START
@@ -280,17 +234,14 @@ void testPlaybackProtocol() {
     Serial.println("✗ Invalid color format");
   }
 
-  delay(2000);
+  Serial.println("\nKeeping color displayed for 15 seconds...");
+  Serial.println("(Audio would play on laptop during this time)");
 
-  // Step 3: Request audio
-  Serial.println("\nREQ:AUDIO");
-  Serial.println("(Audio streaming would happen here)");
-  Serial.println("Simulating 3 second playback...");
-
-  for (int i = 3; i > 0; i--) {
+  // Keep display on for 15 seconds (simulating audio duration)
+  for (int i = 15; i > 0; i--) {
     Serial.print("  ");
     Serial.print(i);
-    Serial.println("...");
+    Serial.println(" seconds remaining...");
     delay(1000);
   }
 
@@ -308,7 +259,7 @@ void testPlaybackProtocol() {
   strip.clear();
   strip.show();
 
-  Serial.println("✓ Playback protocol test complete\n");
+  Serial.println("✓ Color display protocol test complete\n");
   printMenu();
 }
 

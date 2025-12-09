@@ -14,14 +14,19 @@
 
 // Pin Definitions
 #define MIC_PIN A0
-#define POT_PIN A1
-#define BUTTON_PIN 2      // Cap sensor (LOW=open, HIGH=closed)
-#define TILT_PIN 3        // Tilt sensor (LOW=tilted, HIGH=upright)
-#define LED_PIN 6
-#define SD_CS_PIN 10
+#define POT_PIN A2
+#define BUTTON_PIN D7      // Cap sensor (LOW=open, HIGH=closed)
+#define TILT_PIN D2        // Tilt sensor (LOW=tilted, HIGH=upright)
+#define LED_PIN D5
+#define SD_CS_PIN D10
 
 // Configuration
-#define NUM_LEDS 15
+#define NUM_LEDS 7
+
+// WiFi Configuration (edit these for your network)
+const char* WIFI_SSID = "chetan";
+const char* WIFI_PASSWORD = "5123632290";
+const char* SERVER_IP = "192.168.0.191";
 
 // Objects
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -124,39 +129,39 @@ void testLEDs() {
   Serial.println("✓ LED strip initialized");
   Serial.println("\nRunning LED patterns...");
 
-  // Test 1: Red
-  Serial.println("  - Red");
-  strip.fill(strip.Color(255, 0, 0));
-  strip.show();
-  delay(1000);
+  // // Test 1: Red1
+  // Serial.println("  - Red");
+  // strip.fill(strip.Color(255, 0, 0));
+  // strip.show();
+  // delay(1000);
 
-  // Test 2: Green
-  Serial.println("  - Green");
-  strip.fill(strip.Color(0, 255, 0));
-  strip.show();
-  delay(1000);
+  // // Test 2: Green
+  // Serial.println("  - Green");
+  // strip.fill(strip.Color(0, 255, 0));
+  // strip.show();
+  // delay(1000);
 
-  // Test 3: Blue
-  Serial.println("  - Blue");
-  strip.fill(strip.Color(0, 0, 255));
-  strip.show();
-  delay(1000);
+  // // Test 3: Blue
+  // Serial.println("  - Blue");
+  // strip.fill(strip.Color(0, 0, 255));
+  // strip.show();
+  // delay(1000);
 
-  // Test 4: Individual LEDs
-  Serial.println("  - Individual LED sweep");
-  strip.clear();
-  for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(255, 255, 255));
-    strip.show();
-    delay(100);
-  }
+  // // Test 4: Individual LEDs
+  // Serial.println("  - Individual LED sweep");
+  // strip.clear();
+  // for (int i = 0; i < NUM_LEDS; i++) {
+  //   strip.setPixelColor(i, strip.Color(255, 255, 255));
+  //   strip.show();
+  //   delay(100);
+  // }
 
   // Test 5: Brightness ramp
   Serial.println("  - Brightness ramp (like recording)");
-  for (int brightness = 0; brightness <= 255; brightness += 5) {
-    strip.fill(strip.Color(0, 0, brightness));
+  for (int brightness = 0; brightness <= 255; brightness += 1) {
+    strip.fill(strip.Color(brightness, brightness, brightness));
     strip.show();
-    delay(20);
+    delay(30);
   }
 
   strip.clear();
@@ -428,35 +433,15 @@ void testSDCard() {
 
 void testWiFi() {
   Serial.println(">>> WIFI TEST");
-  Serial.println("\nEnter WiFi SSID (or press Enter to skip): ");
+  Serial.println("\nUsing WiFi credentials from top of sketch:");
+  Serial.print("  SSID: ");
+  Serial.println(WIFI_SSID);
+  Serial.print("  Server IP: ");
+  Serial.println(SERVER_IP);
+  Serial.println("\n(Edit WIFI_SSID, WIFI_PASSWORD, and SERVER_IP at the top of the sketch to change)\n");
 
-  // Wait for input
-  String ssid = "";
-  unsigned long timeout = millis() + 10000;
-  while (millis() < timeout && ssid.length() == 0) {
-    if (Serial.available() > 0) {
-      ssid = Serial.readStringUntil('\n');
-      ssid.trim();
-      break;
-    }
-  }
-
-  if (ssid.length() == 0) {
-    Serial.println("Skipping WiFi test.\n");
-    printMenu();
-    return;
-  }
-
-  Serial.print("Enter WiFi password: ");
-  String password = "";
-  timeout = millis() + 10000;
-  while (millis() < timeout && password.length() == 0) {
-    if (Serial.available() > 0) {
-      password = Serial.readStringUntil('\n');
-      password.trim();
-      break;
-    }
-  }
+  String ssid = WIFI_SSID;
+  String password = WIFI_PASSWORD;
 
   Serial.println("\nConnecting to WiFi...");
   WiFi.begin(ssid.c_str(), password.c_str());

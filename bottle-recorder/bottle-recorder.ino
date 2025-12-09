@@ -13,25 +13,28 @@
 
 // Pin Definitions
 #define MIC_PIN A0
-#define POT_PIN A1
-#define BUTTON_PIN 2      // Cap sensor (LOW=open, HIGH=closed)
-#define TILT_PIN 3        // Tilt sensor (LOW=tilted, HIGH=upright)
-#define LED_PIN 6
-#define SD_CS_PIN 10
+#define POT_PIN A2
+#define BUTTON_PIN D7      // Cap sensor (HIGH=open/removed, LOW=closed/on)
+#define TILT_PIN D2        // Tilt sensor (LOW=tilted, HIGH=upright)
+#define LED_PIN D5
+#define SD_CS_PIN D10
 
 // Configuration
-#define NUM_LEDS 15
+#define NUM_LEDS 7
 #define RECORDING_DURATION 15000  // 15 seconds in ms
 #define SAMPLE_RATE 16000
-#define DEBOUNCE_TIME 50
+#define DEBOUNCE_TIME 100
 #define TILT_STABLE_TIME 100
 #define WIFI_TIMEOUT 30000
 #define POT_READ_INTERVAL 100
 
+// Test Mode - Set to true to enable serial command simulation
+#define TEST_MODE false  // Set to false to use real sensors
+
 // TODO: WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://LAPTOP_IP:5000/upload";  // TODO: Update with your laptop IP
+const char* ssid = "jannes";
+const char* password = "dipdip35";
+const char* serverURL = "http://10.238.45.140:5000/upload";
 
 // System States
 enum State {
@@ -70,6 +73,7 @@ unsigned long recordingStartTime = 0;
 // Button States
 bool lastButtonState = HIGH;
 bool buttonState = HIGH;
+bool previousButtonState = HIGH;  // For edge detection
 bool lastTiltState = HIGH;
 bool tiltState = HIGH;
 bool stableTilt = false;
@@ -128,18 +132,29 @@ void setup() {
   // Set initial state
   currentState = IDLE;
   updateLEDs(currentState, 0);
+
+  #if TEST_MODE
+    Serial.println("\n*** TEST MODE ENABLED ***");
+    Serial.println("Use serial commands to simulate sensors");
+    printTestMenu();
+  #endif
 }
 
 void loop() {
-  // Read inputs with debouncing
-  readButtonState();
-  readTiltState();
+  #if TEST_MODE
+    // In test mode, check for serial commands to simulate sensors
+    handleTestCommands();
+  #else
+    // Read inputs with debouncing
+    readButtonState();
+    readTiltState();
 
-  // Read potentiometer periodically
-  if (millis() - lastPotRead > POT_READ_INTERVAL) {
-    readSensorSelection();
-    lastPotRead = millis();
-  }
+    // Read potentiometer periodically
+    if (millis() - lastPotRead > POT_READ_INTERVAL) {
+      readSensorSelection();
+      lastPotRead = millis();
+    }
+  #endif
 
   // State machine
   switch (currentState) {
@@ -171,6 +186,10 @@ void loop() {
       // Stay in error state until reset
       break;
   }
+
+  // Clear edge detection after state processing
+  // This prevents detecting the same edge multiple times
+  previousButtonState = buttonState;
 }
 
 void readButtonState() {
@@ -182,6 +201,7 @@ void readButtonState() {
 
   if ((millis() - lastDebounceTime) > DEBOUNCE_TIME) {
     if (reading != buttonState) {
+      previousButtonState = buttonState;  // Save previous state before updating
       buttonState = reading;
     }
   }
@@ -226,7 +246,17 @@ int getRecordingCount() {
 }
 
 bool isCapOpen() {
-  return buttonState == LOW;
+  return buttonState == HIGH;  // Cap off/removed = button not pressed = HIGH
+}
+
+bool capJustOpened() {
+  // Detect rising edge: cap was on (LOW) and is now removed (HIGH)
+  return (previousButtonState == LOW && buttonState == HIGH);
+}
+
+bool capJustClosed() {
+  // Detect falling edge: cap was off (HIGH) and is now on (LOW)
+  return (previousButtonState == HIGH && buttonState == LOW);
 }
 
 bool isTilted() {
@@ -246,11 +276,17 @@ void handleIdleState() {
   if (abs(potValue - lastPotValue) > 200) {  // Threshold for movement detection
     currentState = SELECTING;
     Serial.println("State: SELECTING");
+    readSensorSelection();  // Update selected sensor
+    Serial.print("Selected: ");
+    Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
+    Serial.print(" (pot value: ");
+    Serial.print(potValue);
+    Serial.println(")");
   }
   lastPotValue = potValue;
 
-  // Check for cap open to start recording
-  if (isCapOpen()) {
+  // Check for cap being removed to start recording
+  if (capJustOpened()) {
     startRecording();
   }
 }
@@ -258,8 +294,8 @@ void handleIdleState() {
 void handleSelectingState() {
   updateLEDs(SELECTING, 0);
 
-  // Check for cap open to start recording
-  if (isCapOpen()) {
+  // Check for cap being removed to start recording
+  if (capJustOpened()) {
     startRecording();
   }
 
@@ -272,9 +308,21 @@ void handleSelectingState() {
 
   // Reset timer if potentiometer is being adjusted
   static int lastPotValue = analogRead(POT_PIN);
+  static SensorType lastSelectedSensor = selectedSensor;
   int potValue = analogRead(POT_PIN);
   if (abs(potValue - lastPotValue) > 100) {
     selectingStartTime = millis();
+
+    // Check if sensor selection changed
+    readSensorSelection();  // Update selected sensor
+    if (selectedSensor != lastSelectedSensor) {
+      Serial.print("Selected: ");
+      Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
+      Serial.print(" (pot value: ");
+      Serial.print(potValue);
+      Serial.println(")");
+      lastSelectedSensor = selectedSensor;
+    }
   }
   lastPotValue = potValue;
 }
@@ -286,20 +334,15 @@ void handleRecordingState() {
 
   updateLEDs(RECORDING, progress);
 
-  // Check if cap is closed (end recording)
-  if (!isCapOpen()) {
+  // Check if cap is put back on (end recording)
+  if (capJustClosed()) {
     stopRecording();
+    return;
   }
 
   // Auto-stop after 15 seconds
   if (elapsed >= RECORDING_DURATION) {
-    if (selectedSensor == AUDIO) {
-      if (!isCapOpen()) {
-        stopRecording();
-      }
-    } else {
-      stopRecording();
-    }
+    stopRecording();
   }
 }
 
@@ -312,11 +355,17 @@ void handleIncompleteState() {
   if (abs(potValue - lastPotValue) > 200) {
     currentState = SELECTING;
     Serial.println("State: SELECTING");
+    readSensorSelection();  // Update selected sensor
+    Serial.print("Selected: ");
+    Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
+    Serial.print(" (pot value: ");
+    Serial.print(potValue);
+    Serial.println(")");
   }
   lastPotValue = potValue;
 
-  // Check for cap open to start recording
-  if (isCapOpen()) {
+  // Check for cap being removed to start recording
+  if (capJustOpened()) {
     startRecording();
   }
 }
@@ -388,34 +437,68 @@ void recordAudio() {
   unsigned long dataSize = SAMPLE_RATE * 2 * (RECORDING_DURATION / 1000);  // 16-bit samples
   writeWAVHeader(audioFile, dataSize);
 
-  // Record audio samples
-  unsigned long startTime = millis();
-  unsigned long sampleInterval = 1000000 / SAMPLE_RATE;  // microseconds
-  unsigned long nextSample = micros();
-
-  while (millis() - startTime < RECORDING_DURATION && isCapOpen()) {
-    if (micros() >= nextSample) {
-      int sample = analogRead(MIC_PIN);
-      // Convert 12-bit ADC (0-4095) to 16-bit signed (-32768 to 32767)
-      int16_t sample16 = (sample - 2048) * 16;
+  #if TEST_MODE
+    // In test mode, write dummy audio data (silence)
+    Serial.println("Creating dummy audio file (no microphone required)");
+    for (int i = 0; i < 1000; i++) {
+      int16_t sample16 = 0;
       audioFile.write((byte*)&sample16, 2);
-      nextSample += sampleInterval;
     }
-  }
+  #else
+    // Record audio samples
+    unsigned long startTime = millis();
+    unsigned long sampleInterval = 1000000 / SAMPLE_RATE;  // microseconds
+    unsigned long nextSample = micros();
+
+    while (millis() - startTime < RECORDING_DURATION) {
+      // Update button state to detect cap closure
+      readButtonState();
+
+      // Check if cap was closed during recording
+      if (capJustClosed()) {
+        Serial.println("Cap closed during audio recording");
+        break;
+      }
+
+      if (micros() >= nextSample) {
+        int sample = analogRead(MIC_PIN);
+        // Convert 12-bit ADC (0-4095) to 16-bit signed (-32768 to 32767)
+        int16_t sample16 = (sample - 2048) * 16;
+        audioFile.write((byte*)&sample16, 2);
+        nextSample += sampleInterval;
+      }
+    }
+  #endif
 
   audioFile.close();
   hasAudio = true;
-  Serial.println("Audio recorded successfully");
+
+  #if TEST_MODE
+    Serial.println("Audio recorded successfully (TEST MODE - dummy file)");
+  #else
+    Serial.println("Audio recorded successfully");
+  #endif
 }
 
 void captureColor() {
-  uint16_t r, g, b, c;
-  colorSensor.getRawData(&r, &g, &b, &c);
+  uint8_t red, green, blue;
 
-  // Normalize to 0-255 range
-  uint8_t red = map(r, 0, 65535, 0, 255);
-  uint8_t green = map(g, 0, 65535, 0, 255);
-  uint8_t blue = map(b, 0, 65535, 0, 255);
+  #if TEST_MODE
+    // In test mode, use dummy color values
+    red = 128;
+    green = 64;
+    blue = 200;
+    Serial.println("Using test color values (no sensor required)");
+  #else
+    // Real mode - read from color sensor
+    uint16_t r, g, b, c;
+    colorSensor.getRawData(&r, &g, &b, &c);
+
+    // Normalize to 0-255 range
+    red = map(r, 0, 65535, 0, 255);
+    green = map(g, 0, 65535, 0, 255);
+    blue = map(b, 0, 65535, 0, 255);
+  #endif
 
   // Save to SD card
   File colorFile = SD.open("/color.dat", FILE_WRITE);
@@ -684,13 +767,13 @@ void enterErrorState() {
 
 void writeWAVHeader(File &file, unsigned long dataSize) {
   // RIFF header
-  file.write("RIFF");
+  file.print("RIFF");
   unsigned long chunkSize = dataSize + 36;
   file.write((byte*)&chunkSize, 4);
-  file.write("WAVE");
+  file.print("WAVE");
 
   // fmt subchunk
-  file.write("fmt ");
+  file.print("fmt ");
   unsigned long subchunk1Size = 16;
   file.write((byte*)&subchunk1Size, 4);
   unsigned short audioFormat = 1;  // PCM
@@ -707,6 +790,113 @@ void writeWAVHeader(File &file, unsigned long dataSize) {
   file.write((byte*)&bitsPerSample, 2);
 
   // data subchunk
-  file.write("data");
+  file.print("data");
   file.write((byte*)&dataSize, 4);
 }
+
+// ============================================================================
+// TEST MODE FUNCTIONS
+// ============================================================================
+
+#if TEST_MODE
+
+void printTestMenu() {
+  Serial.println("\n========================================");
+  Serial.println("  TEST MODE COMMANDS:");
+  Serial.println("========================================");
+  Serial.println("CAP_OPEN     - Simulate cap removed");
+  Serial.println("CAP_CLOSE    - Simulate cap put on");
+  Serial.println("TILT         - Simulate bottle tilted");
+  Serial.println("UPRIGHT      - Simulate bottle upright");
+  Serial.println("POT_MIC      - Select microphone");
+  Serial.println("POT_COLOR    - Select color sensor");
+  Serial.println("STATUS       - Show current state");
+  Serial.println("MENU         - Show this menu");
+  Serial.println("========================================\n");
+}
+
+void handleTestCommands() {
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    command.toUpperCase();
+
+    if (command == "CAP_OPEN") {
+      Serial.println("\n> Simulating: Cap removed");
+      previousButtonState = buttonState;
+      buttonState = HIGH;  // Cap off = HIGH
+
+    } else if (command == "CAP_CLOSE") {
+      Serial.println("\n> Simulating: Cap put on");
+      previousButtonState = buttonState;
+      buttonState = LOW;  // Cap on = LOW
+
+    } else if (command == "TILT") {
+      Serial.println("\n> Simulating: Bottle tilted");
+      tiltState = LOW;  // Tilted = LOW
+      stableTilt = true;
+
+    } else if (command == "UPRIGHT") {
+      Serial.println("\n> Simulating: Bottle upright");
+      tiltState = HIGH;  // Upright = HIGH
+      stableTilt = true;
+
+    } else if (command == "POT_MIC") {
+      Serial.println("\n> Simulating: Potentiometer → Microphone");
+      selectedSensor = AUDIO;
+
+    } else if (command == "POT_COLOR") {
+      Serial.println("\n> Simulating: Potentiometer → Color Sensor");
+      selectedSensor = COLOR;
+
+    } else if (command == "STATUS") {
+      printStatus();
+
+    } else if (command == "MENU") {
+      printTestMenu();
+
+    } else if (command.length() > 0) {
+      Serial.println("\n> Unknown command: " + command);
+      Serial.println("Type MENU for help");
+    }
+  }
+}
+
+void printStatus() {
+  Serial.println("\n========================================");
+  Serial.println("  CURRENT STATUS:");
+  Serial.println("========================================");
+
+  Serial.print("State: ");
+  switch (currentState) {
+    case IDLE: Serial.println("IDLE"); break;
+    case SELECTING: Serial.println("SELECTING"); break;
+    case RECORDING: Serial.println("RECORDING"); break;
+    case INCOMPLETE: Serial.println("INCOMPLETE"); break;
+    case READY: Serial.println("READY"); break;
+    case TRANSFERRING: Serial.println("TRANSFERRING"); break;
+    case ERROR_STATE: Serial.println("ERROR"); break;
+  }
+
+  Serial.print("Selected Sensor: ");
+  Serial.println(selectedSensor == AUDIO ? "AUDIO" : "COLOR");
+
+  Serial.print("Cap State: ");
+  Serial.println(buttonState == HIGH ? "OPEN" : "CLOSED");
+
+  Serial.print("Tilt State: ");
+  Serial.println(tiltState == LOW ? "TILTED" : "UPRIGHT");
+
+  Serial.print("Has Audio: ");
+  Serial.println(hasAudio ? "YES" : "NO");
+
+  Serial.print("Has Color: ");
+  Serial.println(hasColor ? "YES" : "NO");
+
+  Serial.print("Can Pour: ");
+  Serial.println(canPour() ? "YES" : "NO");
+
+  Serial.println("========================================\n");
+}
+
+#endif  // TEST_MODE

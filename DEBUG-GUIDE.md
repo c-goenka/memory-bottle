@@ -53,9 +53,8 @@ Quick reference for debugging hardware and software issues.
 **Tests:**
 1. **LED Strip** - Color patterns, individual LEDs, fade effect
 2. **Serial Communication** - Verify serial connection
-3. **I2S Pins** - Toggle BCLK/LRC/DIN (use multimeter)
-4. **Playback Protocol** - Simulate server commands
-5. **All LED Patterns** - Rainbow, wipe, chase, pulse
+3. **Color Display Protocol** - Simulate server commands (audio plays on laptop)
+4. **All LED Patterns** - Rainbow, wipe, chase, pulse
 
 **Custom Color:** Type `COLOR:255,0,0` for red (or any R,G,B values)
 
@@ -92,18 +91,19 @@ Use LEDs to identify current system state:
 
 - [ ] LED strip lights up (all colors)
 - [ ] Serial communication works
-- [ ] I2S pins toggle (if testing with scope)
 - [ ] Receives PLAY:START command
 - [ ] Displays color from COLOR:R,G,B
+- [ ] Fades out color after display period
 
 ### Server - Before Integration
 
 - [ ] Python 3.7+ installed
-- [ ] Flask and pyserial installed
+- [ ] Flask, pyserial, and pygame installed
 - [ ] Port 5000 available
 - [ ] Serial port detected
 - [ ] Can connect to Arduino
 - [ ] uploads/ directory writable
+- [ ] Audio playback works (laptop speakers)
 
 ## Common Debug Patterns
 
@@ -284,7 +284,7 @@ After all components pass individual tests:
 Watch real-time state changes:
 
 **ESP32:** Shows current state, sensor readings, WiFi status
-**UNO R4:** Shows playback commands, color data, audio streaming
-**Server:** Shows file uploads, serial commands sent
+**UNO R4:** Shows color display commands, color data received
+**Server:** Shows file uploads, audio playback, serial commands sent
 
 Run all three simultaneously for full system visibility.

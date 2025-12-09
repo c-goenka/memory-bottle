@@ -9,6 +9,7 @@ import serial
 import serial.tools.list_ports
 import time
 from pathlib import Path
+import pygame
 
 app = Flask(__name__)
 
@@ -98,49 +99,26 @@ def send_color_to_arduino(color_data):
     return False
 
 
-def send_audio_to_arduino(audio_path):
-    """Stream audio data to Arduino"""
-    global arduino_serial
-
-    # Wait for Arduino to request audio
-    timeout = time.time() + 5
-    while time.time() < timeout:
-        if arduino_serial and arduino_serial.in_waiting > 0:
-            request = arduino_serial.readline().decode().strip()
-            if request == "REQ:AUDIO":
-                break
-        time.sleep(0.1)
-    else:
-        print("Timeout waiting for audio request")
-        return False
-
+def play_audio_on_laptop(audio_path):
+    """Play audio through laptop speakers using pygame"""
     try:
-        with open(audio_path, 'rb') as f:
-            # Skip WAV header (44 bytes)
-            f.seek(44)
+        # Initialize pygame mixer if not already initialized
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(frequency=16000, size=-16, channels=1)
 
-            # Stream audio samples
-            chunk_size = 512  # bytes (256 samples)
-            bytes_sent = 0
+        print(f"Playing audio on laptop speakers: {audio_path}")
+        pygame.mixer.music.load(str(audio_path))
+        pygame.mixer.music.play()
 
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
+        # Wait for audio to finish playing
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
 
-                arduino_serial.write(chunk)
-                bytes_sent += len(chunk)
-
-                # Small delay to prevent buffer overflow
-                time.sleep(0.01)
-
-            # Send end marker
-            arduino_serial.write(b"END:AUDIO\n")
-            print(f"Sent {bytes_sent} bytes of audio data")
-            return True
+        print("Audio playback finished")
+        return True
 
     except Exception as e:
-        print(f"Error sending audio: {e}")
+        print(f"Error playing audio: {e}")
         return False
 
 
@@ -184,7 +162,7 @@ def upload_files():
             color_data = f.read().strip()
             print(f"  Color RGB: {color_data}")
 
-        # Send command to Arduino to start playback
+        # Send command to Arduino to display color
         if send_command_to_arduino("PLAY:START"):
             # Wait a moment for Arduino to acknowledge
             time.sleep(0.5)
@@ -197,19 +175,23 @@ def upload_files():
             # Send color data when Arduino requests it
             send_color_to_arduino(color_data)
 
-            # Send audio data when Arduino requests it
-            send_audio_to_arduino(audio_path)
+            # Play audio through laptop speakers
+            play_audio_on_laptop(audio_path)
 
             return jsonify({
                 'status': 'success',
-                'message': 'Files received and playback started',
+                'message': 'Files received, audio played on laptop, color displayed on Arduino',
                 'audio_size': os.path.getsize(audio_path),
                 'color': color_data
             }), 200
         else:
+            # Even if Arduino isn't connected, play audio
+            print("Arduino not connected, playing audio anyway")
+            play_audio_on_laptop(audio_path)
+
             return jsonify({
                 'status': 'warning',
-                'message': 'Files saved but could not connect to Arduino'
+                'message': 'Files saved and audio played, but could not connect to Arduino for color display'
             }), 200
 
     except Exception as e:
@@ -257,6 +239,10 @@ if __name__ == '__main__':
     print("=" * 60)
     print("Memory Bottle Server Starting")
     print("=" * 60)
+
+    # Initialize pygame mixer for audio playback
+    pygame.mixer.init(frequency=16000, size=-16, channels=1)
+    print("Audio playback initialized (laptop speakers)")
 
     # Try to connect to Arduino
     connect_to_arduino()
