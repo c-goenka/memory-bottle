@@ -109,24 +109,23 @@ void setup() {
   }
   Serial.println("Color sensor initialized");
 
-  // Connect to WiFi (commented out for faster testing)
-  // WiFi.begin(ssid, password);
-  // Serial.print("Connecting to WiFi");
-  // int attempts = 0;
-  // while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-  //   delay(500);
-  //   Serial.print(".");
-  //   attempts++;
-  // }
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
 
-  // if (WiFi.status() == WL_CONNECTED) {
-  //   Serial.println("\nWiFi connected");
-  //   Serial.print("IP: ");
-  //   Serial.println(WiFi.localIP());
-  // } else {
-  //   Serial.println("\nWiFi connection failed - will retry during transfer");
-  // }
-  Serial.println("WiFi connection skipped (enable in code when ready to test transfer)");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi connection failed - will retry during transfer");
+  }
 
   // Clear old recordings on startup (for testing)
   Serial.println("Clearing old recordings...");
