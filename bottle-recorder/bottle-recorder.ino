@@ -34,7 +34,7 @@
 // TODO: WiFi credentials
 const char* ssid = "jannes";
 const char* password = "dipdip35";
-const char* serverURL = "http://10.238.45.140:5000/upload";
+const char* serverURL = "http://10.238.45.140:5001/upload";
 
 // System States
 enum State {
