@@ -70,7 +70,9 @@ def send_command_to_arduino(command):
 def send_color_handshake(color_data):
     """Wait for UNO R4 to ask for color, then send it"""
     global arduino_serial
-    if not arduino_serial: return
+    if not arduino_serial:
+        print("✗ No Arduino serial connection")
+        return
 
 
     print("Waiting for UNO R4 to request color...")
@@ -78,6 +80,7 @@ def send_color_handshake(color_data):
     while time.time() - start < 5:
         if arduino_serial.in_waiting:
             line = arduino_serial.readline().decode().strip()
+            print(f"[UNO R4]: {line}")  # Debug: print all messages from Arduino
             if line == "REQ:COLOR":
                 arduino_serial.write(f"{color_data}\n".encode())
                 print(f"✓ Sent color data: {color_data}")
@@ -131,7 +134,10 @@ def upload_files():
 
         # 3. Trigger UNO R4 (LEDs)
         if send_command_to_arduino("PLAY:START"):
+            print("✓ Sent PLAY:START to UNO R4")
             send_color_handshake(color_data)
+        else:
+            print("✗ Failed to send PLAY:START (UNO R4 not connected)")
 
         # 4. Play Audio (Laptop)
         play_audio_on_laptop(UPLOAD_FOLDER / 'audio.wav')
@@ -151,6 +157,79 @@ def status():
         'server': 'running',
         'arduino': arduino_serial is not None and arduino_serial.is_open
     })
+
+
+@app.route('/test-playback', methods=['GET'])
+def test_playback():
+    """Test endpoint to verify UNO R4 LED display and audio playback
+    Uses saved files from uploads/ folder if they exist"""
+    try:
+        print("\n" + "="*40)
+        print("TEST PLAYBACK MODE (using saved files)")
+        print("="*40)
+
+        # Check for saved color data
+        color_file = UPLOAD_FOLDER / 'color.dat'
+        if color_file.exists():
+            with open(color_file, 'r') as f:
+                test_color = f.read().strip()
+            print(f"✓ Using saved color: {test_color}")
+        else:
+            # Default test color: Bright Purple
+            test_color = "255,0,255"
+            print(f"⚠ No color.dat found, using default purple: {test_color}")
+
+        # Check for saved audio file
+        test_audio = UPLOAD_FOLDER / 'audio.wav'
+
+        if not test_audio.exists():
+            print("⚠ No audio file found in uploads/")
+            print("Creating silent test audio...")
+            create_test_audio(test_audio)
+        else:
+            print(f"✓ Using saved audio: {test_audio}")
+
+        # Trigger UNO R4 (LEDs)
+        if send_command_to_arduino("PLAY:START"):
+            print("✓ Sent PLAY:START to UNO R4")
+            send_color_handshake(test_color)
+        else:
+            print("✗ Failed to send PLAY:START (UNO R4 not connected)")
+
+        # Play Audio (Laptop)
+        play_audio_on_laptop(test_audio)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Test playback complete',
+            'color': test_color,
+            'audio_file': str(test_audio)
+        }), 200
+
+    except Exception as e:
+        print(f"Error in test playback: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def create_test_audio(filepath):
+    """Create a simple test audio file (1 second of silence)"""
+    import wave
+    import struct
+
+    sample_rate = 16000
+    duration = 1  # 1 second
+    num_samples = sample_rate * duration
+
+    with wave.open(str(filepath), 'w') as wav_file:
+        wav_file.setnchannels(1)  # Mono
+        wav_file.setsampwidth(2)  # 16-bit
+        wav_file.setframerate(sample_rate)
+
+        # Write silence (zeros)
+        for _ in range(num_samples):
+            wav_file.writeframes(struct.pack('h', 0))
+
+    print(f"✓ Created test audio file: {filepath}")
 
 
 if __name__ == '__main__':
