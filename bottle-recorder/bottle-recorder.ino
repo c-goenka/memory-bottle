@@ -454,6 +454,77 @@ void stopRecording() {
 }
 
 void recordAudio() {
+  SD.remove("/audio.wav");
+  File audioFile = SD.open("/audio.wav", FILE_WRITE);
+
+  if (!audioFile) {
+    enterErrorState();
+    return;
+  }
+
+  // Placeholder Header
+  writeWAVHeader(audioFile, 0);
+
+  Serial.println("--- FORCED 15s RECORDING ---");
+  Serial.println("Recording will NOT stop if cap is closed.");
+
+  const int bufferSize = 4096;
+  static uint8_t buffer[bufferSize];
+  int bufferIndex = 0;
+
+  unsigned long startTime = millis();
+  unsigned long sampleInterval = 1000000 / SAMPLE_RATE;
+  unsigned long nextSample = micros();
+  unsigned long totalBytesWritten = 0;
+
+  // Loop runs strictly until time < 15000ms is exceeded
+  while (millis() - startTime < RECORDING_DURATION) {
+
+    // THE STOP CODE IS REMOVED HERE
+    // We only read the button for debug status, but do NOT abort.
+    if (millis() % 1000 == 0) { // Print status once every second
+       int btn = digitalRead(BUTTON_PIN);
+       Serial.print("Recording... Button State: ");
+       Serial.println(btn); // 1 or 0
+    }
+
+    if (micros() >= nextSample) {
+      int sample = analogRead(MIC_PIN);
+      int16_t sample16 = (sample - 2048) * 16;
+
+      buffer[bufferIndex] = sample16 & 0xFF;
+      buffer[bufferIndex + 1] = (sample16 >> 8);
+      bufferIndex += 2;
+
+      nextSample += sampleInterval;
+      if (micros() - nextSample > 2000) nextSample = micros();
+
+      if (bufferIndex >= bufferSize) {
+        audioFile.write(buffer, bufferSize);
+        totalBytesWritten += bufferSize;
+        bufferIndex = 0;
+      }
+    }
+  }
+
+  // Write remaining data
+  if (bufferIndex > 0) {
+    audioFile.write(buffer, bufferIndex);
+    totalBytesWritten += bufferIndex;
+  }
+
+  Serial.print("Recording Finished. Total Bytes: ");
+  Serial.println(totalBytesWritten);
+
+  // Update header
+  audioFile.seek(0);
+  writeWAVHeader(audioFile, totalBytesWritten);
+  audioFile.close();
+
+  hasAudio = true;
+}
+
+
   File audioFile = SD.open("/audio.wav", FILE_WRITE);
   if (!audioFile) {
     Serial.println("Failed to open audio.wav for writing");
