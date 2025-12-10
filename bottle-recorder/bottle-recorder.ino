@@ -34,7 +34,7 @@
 // TODO: WiFi credentials
 const char* ssid = "jannes";
 const char* password = "dipdip35";
-const char* serverURL = "http://10.238.45.140:5001/upload";
+const char* serverURL = "http://10.238.45.55:8080/upload";
 
 // System States
 enum State {
@@ -420,15 +420,36 @@ void handleTransferringState() {
 }
 
 void startRecording() {
+  // Set global state so updateLEDs knows which color to use
   currentState = RECORDING;
-  recordingStartTime = millis();
-  Serial.print("Starting recording: ");
+
+  Serial.print("Started recording: ");
   Serial.println(selectedSensor == AUDIO ? "AUDIO" : "COLOR");
 
-  if (selectedSensor == COLOR) {
+  if (selectedSensor == AUDIO) {
+    // RUN AUDIO RECORDING NOW (Blocks until finished)
+    recordAudio();
+  } else {
+    // Capture color immediately
     captureColor();
   }
+
+  // When recording finishes (cap closed or time up), calculate next state immediately
+  int count = getRecordingCount();
+  if (count == 1) {
+    currentState = INCOMPLETE;
+    Serial.println("State: INCOMPLETE");
+  } else if (count == 2) {
+    currentState = READY;
+    Serial.println("State: READY");
+  } else {
+    currentState = IDLE;
+    Serial.println("State: IDLE");
+  }
+
+  saveRecordingStatus();
 }
+
 
 void stopRecording() {
   Serial.println("Stopping recording");
@@ -453,6 +474,7 @@ void stopRecording() {
   saveRecordingStatus();
 }
 
+
 void recordAudio() {
   SD.remove("/audio.wav");
   File audioFile = SD.open("/audio.wav", FILE_WRITE);
@@ -462,7 +484,7 @@ void recordAudio() {
     return;
   }
 
-  // Placeholder Header
+  // Platzhalter Header
   writeWAVHeader(audioFile, 0);
 
   Serial.println("--- FORCED 15s RECORDING ---");
@@ -477,15 +499,15 @@ void recordAudio() {
   unsigned long nextSample = micros();
   unsigned long totalBytesWritten = 0;
 
-  // Loop runs strictly until time < 15000ms is exceeded
+  // Schleife läuft strikt solange die Zeit < 15000ms ist
   while (millis() - startTime < RECORDING_DURATION) {
 
-    // THE STOP CODE IS REMOVED HERE
-    // We only read the button for debug status, but do NOT abort.
-    if (millis() % 1000 == 0) { // Print status once every second
+    // HIER WURDE DER STOPP-CODE ENTFERNT
+    // Wir lesen den Knopf nur zu Debug-Zwecken, brechen aber NICHT ab.
+    if (millis() % 1000 == 0) { // Jede Sekunde einmal Status drucken
        int btn = digitalRead(BUTTON_PIN);
        Serial.print("Recording... Button State: ");
-       Serial.println(btn); // 1 or 0
+       Serial.println(btn); // 1 oder 0
     }
 
     if (micros() >= nextSample) {
@@ -507,7 +529,7 @@ void recordAudio() {
     }
   }
 
-  // Write remaining data
+  // Restliche Daten schreiben
   if (bufferIndex > 0) {
     audioFile.write(buffer, bufferIndex);
     totalBytesWritten += bufferIndex;
@@ -516,7 +538,7 @@ void recordAudio() {
   Serial.print("Recording Finished. Total Bytes: ");
   Serial.println(totalBytesWritten);
 
-  // Update header
+  // Header updaten
   audioFile.seek(0);
   writeWAVHeader(audioFile, totalBytesWritten);
   audioFile.close();
@@ -524,60 +546,6 @@ void recordAudio() {
   hasAudio = true;
 }
 
-
-  File audioFile = SD.open("/audio.wav", FILE_WRITE);
-  if (!audioFile) {
-    Serial.println("Failed to open audio.wav for writing");
-    enterErrorState();
-    return;
-  }
-
-  // Write WAV header (44 bytes)
-  unsigned long dataSize = SAMPLE_RATE * 2 * (RECORDING_DURATION / 1000);  // 16-bit samples
-  writeWAVHeader(audioFile, dataSize);
-
-  #if TEST_MODE
-    // In test mode, write dummy audio data (silence)
-    Serial.println("Creating dummy audio file (no microphone required)");
-    for (int i = 0; i < 1000; i++) {
-      int16_t sample16 = 0;
-      audioFile.write((byte*)&sample16, 2);
-    }
-  #else
-    // Record audio samples
-    unsigned long startTime = millis();
-    unsigned long sampleInterval = 1000000 / SAMPLE_RATE;  // microseconds
-    unsigned long nextSample = micros();
-
-    while (millis() - startTime < RECORDING_DURATION) {
-      // Update button state to detect cap closure
-      readButtonState();
-
-      // Check if cap was closed during recording
-      if (capJustClosed()) {
-        Serial.println("Cap closed during audio recording");
-        break;
-      }
-
-      if (micros() >= nextSample) {
-        int sample = analogRead(MIC_PIN);
-        // Convert 12-bit ADC (0-4095) to 16-bit signed (-32768 to 32767)
-        int16_t sample16 = (sample - 2048) * 16;
-        audioFile.write((byte*)&sample16, 2);
-        nextSample += sampleInterval;
-      }
-    }
-  #endif
-
-  audioFile.close();
-  hasAudio = true;
-
-  #if TEST_MODE
-    Serial.println("Audio recorded successfully (TEST MODE - dummy file)");
-  #else
-    Serial.println("Audio recorded successfully");
-  #endif
-}
 
 void captureColor() {
   uint8_t red, green, blue;
@@ -624,6 +592,7 @@ void captureColor() {
 }
 
 void transferData() {
+  // 1. Ensure WiFi Connection
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected, attempting reconnection...");
     WiFi.begin(ssid, password);
@@ -637,59 +606,58 @@ void transferData() {
     }
   }
 
-  HTTPClient http;
-  http.begin(serverURL);
-  http.setTimeout(WIFI_TIMEOUT);
+  // 2. Read Color Data
+  String colorString = "128,128,128"; // DEFAULT VALUE
 
-  // Create multipart form data
-  String boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-  http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-
-  // Read files from SD
-  File audioFile = SD.open("/audio.wav", FILE_READ);
   File colorFile = SD.open("/color.dat", FILE_READ);
+  if (colorFile) {
+    if (colorFile.available()) {
+      colorString = colorFile.readString();
+      colorString.trim(); // Remove whitespace/newlines
+    }
+    colorFile.close();
+  } else {
+    Serial.println("Warning: color.dat missing, using default gray");
+  }
 
-  if (!audioFile || !colorFile) {
-    Serial.println("Failed to open files for transfer");
-    if (audioFile) audioFile.close();
-    if (colorFile) colorFile.close();
+  // SAFETY CHECK: If string is still empty, force a value
+  if (colorString.length() == 0) {
+    colorString = "128,128,128";
+  }
+
+  // Debug Print: SEE WHAT WE ARE SENDING
+  Serial.print("Sending Color Header: [");
+  Serial.print(colorString);
+  Serial.println("]");
+
+  // 3. Open Audio File
+  File audioFile = SD.open("/audio.wav", FILE_READ);
+  if (!audioFile) {
+    Serial.println("Failed to open audio.wav");
     handleTransferFailure();
     return;
   }
 
-  // Build multipart body
-  String body = "";
+  // 4. Start HTTP Request
+  HTTPClient http;
+  http.begin(serverURL);
+  http.setTimeout(WIFI_TIMEOUT);
 
-  // Audio file part
-  body += "--" + boundary + "\r\n";
-  body += "Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\r\n";
-  body += "Content-Type: audio/wav\r\n\r\n";
+  // Headers
+  http.addHeader("Content-Type", "audio/wav");
+  http.addHeader("X-Color-Data", colorString);
 
-  String audioData = "";
-  while (audioFile.available()) {
-    audioData += (char)audioFile.read();
-  }
-  body += audioData + "\r\n";
+  Serial.print("Uploading ");
+  Serial.print(audioFile.size());
+  Serial.println(" bytes...");
 
-  // Color file part
-  body += "--" + boundary + "\r\n";
-  body += "Content-Disposition: form-data; name=\"color\"; filename=\"color.dat\"\r\n";
-  body += "Content-Type: text/plain\r\n\r\n";
-
-  String colorData = "";
-  while (colorFile.available()) {
-    colorData += (char)colorFile.read();
-  }
-  body += colorData + "\r\n";
-  body += "--" + boundary + "--\r\n";
+  // 5. STREAM the audio file
+  int httpCode = http.sendRequest("POST", &audioFile, audioFile.size());
 
   audioFile.close();
-  colorFile.close();
 
-  // Send POST request
-  int httpCode = http.POST(body);
-
-  if (httpCode == HTTP_CODE_OK) {
+  // 6. Handle Response
+  if (httpCode == 200) {
     Serial.println("Transfer successful!");
     wifiFailCount = 0;
     clearMemory();
@@ -698,11 +666,16 @@ void transferData() {
   } else {
     Serial.print("Transfer failed, code: ");
     Serial.println(httpCode);
+    if (httpCode > 0) {
+      String response = http.getString();
+      Serial.println(response);
+    }
     handleTransferFailure();
   }
 
   http.end();
 }
+
 
 void handleTransferFailure() {
   wifiFailCount++;
