@@ -69,6 +69,7 @@ unsigned long lastPotRead = 0;
 unsigned long lastDebounceTime = 0;
 unsigned long tiltStableTime = 0;
 unsigned long recordingStartTime = 0;
+unsigned long selectingStartTime = 0;
 
 // Button States
 bool lastButtonState = HIGH;
@@ -108,26 +109,33 @@ void setup() {
   }
   Serial.println("Color sensor initialized");
 
-  // Connect to WiFi
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
+  // Connect to WiFi (commented out for faster testing)
+  // WiFi.begin(ssid, password);
+  // Serial.print("Connecting to WiFi");
+  // int attempts = 0;
+  // while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  //   delay(500);
+  //   Serial.print(".");
+  //   attempts++;
+  // }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nWiFi connection failed - will retry during transfer");
-  }
+  // if (WiFi.status() == WL_CONNECTED) {
+  //   Serial.println("\nWiFi connected");
+  //   Serial.print("IP: ");
+  //   Serial.println(WiFi.localIP());
+  // } else {
+  //   Serial.println("\nWiFi connection failed - will retry during transfer");
+  // }
+  Serial.println("WiFi connection skipped (enable in code when ready to test transfer)");
 
-  // Load recording counts from SD
-  loadRecordingStatus();
+  // Clear old recordings on startup (for testing)
+  Serial.println("Clearing old recordings...");
+  SD.remove("/audio.wav");
+  SD.remove("/color.dat");
+  SD.remove("/recordings.txt");
+  hasAudio = false;
+  hasColor = false;
+  Serial.println("Memory cleared - starting fresh");
 
   // Set initial state
   currentState = IDLE;
@@ -147,12 +155,39 @@ void loop() {
   #else
     // Read inputs with debouncing
     readButtonState();
-    readTiltState();
+    readTiltState();  // Using physical tilt sensor
 
     // Read potentiometer periodically
     if (millis() - lastPotRead > POT_READ_INTERVAL) {
       readSensorSelection();
       lastPotRead = millis();
+    }
+
+    // Debug: Print tilt sensor status periodically
+    static unsigned long lastTiltPrint = 0;
+    if (millis() - lastTiltPrint > 1000) {  // Print every 1 second
+      Serial.print("[TILT] State: ");
+      Serial.print(tiltState == LOW ? "TILTED" : "UPRIGHT");
+      Serial.print(" | Stable: ");
+      Serial.println(stableTilt ? "YES" : "NO");
+      lastTiltPrint = millis();
+    }
+
+    // Manual tilt control for testing (type TILT or UPRIGHT in Serial Monitor to override)
+    if (Serial.available() > 0) {
+      String command = Serial.readStringUntil('\n');
+      command.trim();
+      command.toUpperCase();
+
+      if (command == "TILT") {
+        tiltState = LOW;
+        stableTilt = true;
+        Serial.println("[MANUAL OVERRIDE] Tilt sensor → TILTED");
+      } else if (command == "UPRIGHT") {
+        tiltState = HIGH;
+        stableTilt = true;
+        Serial.println("[MANUAL OVERRIDE] Tilt sensor → UPRIGHT");
+      }
     }
   #endif
 
@@ -217,7 +252,7 @@ void readTiltState() {
     stableTilt = false;
   } else if (!stableTilt && (millis() - tiltStableTime) > TILT_STABLE_TIME) {
     stableTilt = true;
-    tiltState = reading;
+    tiltState = !reading;  // Inverted because sensor is mounted upside down
   }
 
   lastTiltState = reading;
@@ -226,8 +261,6 @@ void readTiltState() {
 SensorType readSensorSelection() {
   int potValue = analogRead(POT_PIN);
 
-  // TODO: Potentiometer values
-  // 0-512 is mic, 513-1023 is color (adjusting for ESP32 12-bit ADC: 0-4095)
   // ESP32 has 12-bit ADC (0-4095), so we scale the thresholds
   if (potValue < 2048) {
     selectedSensor = AUDIO;
@@ -273,8 +306,10 @@ void handleIdleState() {
   // Check for potentiometer rotation to enter SELECTING
   static int lastPotValue = 0;
   int potValue = analogRead(POT_PIN);
-  if (abs(potValue - lastPotValue) > 200) {  // Threshold for movement detection
+
+  if (abs(potValue - lastPotValue) > 50) {  // Threshold for movement detection
     currentState = SELECTING;
+    selectingStartTime = millis();  // Reset the timer when entering SELECTING
     Serial.println("State: SELECTING");
     readSensorSelection();  // Update selected sensor
     Serial.print("Selected: ");
@@ -300,7 +335,6 @@ void handleSelectingState() {
   }
 
   // Return to IDLE if no activity for a while
-  static unsigned long selectingStartTime = millis();
   if (millis() - selectingStartTime > 5000) {
     currentState = IDLE;
     Serial.println("State: IDLE (timeout from selecting)");
@@ -352,8 +386,9 @@ void handleIncompleteState() {
   // Check for potentiometer rotation to enter SELECTING
   static int lastPotValue = 0;
   int potValue = analogRead(POT_PIN);
-  if (abs(potValue - lastPotValue) > 200) {
+  if (abs(potValue - lastPotValue) > 50) {  // Match IDLE threshold
     currentState = SELECTING;
+    selectingStartTime = millis();  // Reset the timer when entering SELECTING
     Serial.println("State: SELECTING");
     readSensorSelection();  // Update selected sensor
     Serial.print("Selected: ");
@@ -386,12 +421,6 @@ void handleTransferringState() {
 }
 
 void startRecording() {
-  // Check for incomplete pour attempt
-  if (isTilted() && !canPour()) {
-    showIncompletePourWarning();
-    return;
-  }
-
   currentState = RECORDING;
   recordingStartTime = millis();
   Serial.print("Starting recording: ");
