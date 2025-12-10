@@ -154,7 +154,7 @@ void loop() {
   #else
     // Read inputs with debouncing
     readButtonState();
-    readTiltState();  // Using physical tilt sensor
+    readTiltState();  // Re-enabled tilt sensor
 
     // Read potentiometer periodically
     if (millis() - lastPotRead > POT_READ_INTERVAL) {
@@ -170,23 +170,6 @@ void loop() {
       Serial.print(" | Stable: ");
       Serial.println(stableTilt ? "YES" : "NO");
       lastTiltPrint = millis();
-    }
-
-    // Manual tilt control for testing (type TILT or UPRIGHT in Serial Monitor to override)
-    if (Serial.available() > 0) {
-      String command = Serial.readStringUntil('\n');
-      command.trim();
-      command.toUpperCase();
-
-      if (command == "TILT") {
-        tiltState = LOW;
-        stableTilt = true;
-        Serial.println("[MANUAL OVERRIDE] Tilt sensor → TILTED");
-      } else if (command == "UPRIGHT") {
-        tiltState = HIGH;
-        stableTilt = true;
-        Serial.println("[MANUAL OVERRIDE] Tilt sensor → UPRIGHT");
-      }
     }
   #endif
 
@@ -303,10 +286,33 @@ void handleIdleState() {
   updateLEDs(IDLE, 0);
 
   // Check for potentiometer rotation to enter SELECTING
-  static int lastPotValue = 0;
+  static int lastPotValue = -1;  // -1 means uninitialized
+  static bool firstRun = true;
   int potValue = analogRead(POT_PIN);
 
-  if (abs(potValue - lastPotValue) > 50) {  // Threshold for movement detection
+  // Initialize lastPotValue on first run
+  if (firstRun) {
+    lastPotValue = potValue;
+    firstRun = false;
+    Serial.print("Initial pot value: ");
+    Serial.println(potValue);
+  }
+
+  // Debug: Print pot change periodically
+  static unsigned long lastDebugPrint = 0;
+  if (millis() - lastDebugPrint > 500) {
+    int diff = abs(potValue - lastPotValue);
+    Serial.print("[POT DEBUG] Current: ");
+    Serial.print(potValue);
+    Serial.print(" | Last: ");
+    Serial.print(lastPotValue);
+    Serial.print(" | Diff: ");
+    Serial.println(diff);
+    lastDebugPrint = millis();
+  }
+
+  if (abs(potValue - lastPotValue) > 150) {  // Reduced threshold for better sensitivity
+    lastPotValue = potValue;  // Update ONLY when threshold is met
     currentState = SELECTING;
     selectingStartTime = millis();  // Reset the timer when entering SELECTING
     Serial.println("State: SELECTING");
@@ -317,11 +323,11 @@ void handleIdleState() {
     Serial.print(potValue);
     Serial.println(")");
   }
-  lastPotValue = potValue;
 
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
+    return;  // CRITICAL: Return immediately to prevent state from being overridden
   }
 }
 
@@ -331,6 +337,7 @@ void handleSelectingState() {
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
+    return;  // CRITICAL: Return immediately to prevent state from being overridden
   }
 
   // Return to IDLE if no activity for a while
@@ -340,10 +347,19 @@ void handleSelectingState() {
   }
 
   // Reset timer if potentiometer is being adjusted
-  static int lastPotValue = analogRead(POT_PIN);
+  static int lastPotValue = -1;  // Initialize to -1
+  static bool firstPotRead = true;
   static SensorType lastSelectedSensor = selectedSensor;
   int potValue = analogRead(POT_PIN);
-  if (abs(potValue - lastPotValue) > 100) {
+
+  // Initialize on first read
+  if (firstPotRead) {
+    lastPotValue = potValue;
+    firstPotRead = false;
+  }
+
+  if (abs(potValue - lastPotValue) > 150) {  // Match IDLE threshold
+    lastPotValue = potValue;  // Update ONLY when threshold is met
     selectingStartTime = millis();
 
     // Check if sensor selection changed
@@ -357,7 +373,6 @@ void handleSelectingState() {
       lastSelectedSensor = selectedSensor;
     }
   }
-  lastPotValue = potValue;
 }
 
 void handleRecordingState() {
@@ -383,9 +398,18 @@ void handleIncompleteState() {
   updateLEDs(INCOMPLETE, 0);
 
   // Check for potentiometer rotation to enter SELECTING
-  static int lastPotValue = 0;
+  static int lastPotValue = -1;  // -1 means uninitialized
+  static bool firstRun = true;
   int potValue = analogRead(POT_PIN);
-  if (abs(potValue - lastPotValue) > 50) {  // Match IDLE threshold
+
+  // Initialize lastPotValue on first run
+  if (firstRun) {
+    lastPotValue = potValue;
+    firstRun = false;
+  }
+
+  if (abs(potValue - lastPotValue) > 150) {  // Reduced threshold for better sensitivity
+    lastPotValue = potValue;  // Update ONLY when threshold is met
     currentState = SELECTING;
     selectingStartTime = millis();  // Reset the timer when entering SELECTING
     Serial.println("State: SELECTING");
@@ -396,11 +420,11 @@ void handleIncompleteState() {
     Serial.print(potValue);
     Serial.println(")");
   }
-  lastPotValue = potValue;
 
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
+    return;  // CRITICAL: Return immediately to prevent state from being overridden
   }
 }
 
@@ -435,7 +459,15 @@ void startRecording() {
   }
 
   // When recording finishes (cap closed or time up), calculate next state immediately
+  Serial.print("[DEBUG] After recording - hasAudio: ");
+  Serial.print(hasAudio);
+  Serial.print(", hasColor: ");
+  Serial.println(hasColor);
+
   int count = getRecordingCount();
+  Serial.print("[DEBUG] Recording count: ");
+  Serial.println(count);
+
   if (count == 1) {
     currentState = INCOMPLETE;
     Serial.println("State: INCOMPLETE");
@@ -452,14 +484,22 @@ void startRecording() {
 
 
 void stopRecording() {
-  Serial.println("Stopping recording");
+  // NOTE: This function is currently dead code because recordAudio() and captureColor()
+  // block for their full duration, so handleRecordingState() never runs during recording.
+  // State transitions happen in startRecording() after the blocking calls complete.
 
-  if (selectedSensor == AUDIO) {
-    recordAudio();  // Finalize the audio recording
-  }
+  Serial.println("[WARNING] stopRecording() called - this shouldn't happen with blocking recording!");
 
   // Determine next state based on recording count
+  Serial.print("[DEBUG] stopRecording - hasAudio: ");
+  Serial.print(hasAudio);
+  Serial.print(", hasColor: ");
+  Serial.println(hasColor);
+
   int count = getRecordingCount();
+  Serial.print("[DEBUG] Recording count: ");
+  Serial.println(count);
+
   if (count == 1) {
     currentState = INCOMPLETE;
     Serial.println("State: INCOMPLETE");
@@ -499,8 +539,22 @@ void recordAudio() {
   unsigned long nextSample = micros();
   unsigned long totalBytesWritten = 0;
 
+  // LED update tracking
+  unsigned long lastLEDUpdate = 0;
+  const int LED_UPDATE_INTERVAL = 100;  // Update LEDs every 100ms
+
   // Schleife läuft strikt solange die Zeit < 15000ms ist
   while (millis() - startTime < RECORDING_DURATION) {
+
+    // Update LEDs to show recording progress
+    unsigned long currentTime = millis();
+    if (currentTime - lastLEDUpdate >= LED_UPDATE_INTERVAL) {
+      unsigned long elapsed = currentTime - startTime;
+      int progress = (elapsed * NUM_LEDS) / RECORDING_DURATION;
+      progress = constrain(progress, 0, NUM_LEDS);
+      updateLEDs(RECORDING, progress);
+      lastLEDUpdate = currentTime;
+    }
 
     // HIER WURDE DER STOPP-CODE ENTFERNT
     // Wir lesen den Knopf nur zu Debug-Zwecken, brechen aber NICHT ab.
@@ -538,16 +592,47 @@ void recordAudio() {
   Serial.print("Recording Finished. Total Bytes: ");
   Serial.println(totalBytesWritten);
 
+  // Create a blink effect: turn off briefly, then show blue
+  strip.clear();
+  strip.show();
+  delay(200);  // Brief off period
+
+  strip.fill(strip.Color(0, 0, 255));
+  strip.show();
+  delay(500);  // Hold at full brightness briefly
+
   // Header updaten
   audioFile.seek(0);
   writeWAVHeader(audioFile, totalBytesWritten);
   audioFile.close();
 
   hasAudio = true;
+  Serial.println("[DEBUG] hasAudio flag set to TRUE");
 }
 
 
 void captureColor() {
+  Serial.println("--- COLOR RECORDING (8 seconds) ---");
+
+  // LED update tracking
+  const unsigned long COLOR_RECORDING_DURATION = 8000;  // 8 seconds
+  const int LED_UPDATE_INTERVAL = 100;  // Update LEDs every 100ms
+  unsigned long startTime = millis();
+  unsigned long lastLEDUpdate = 0;
+
+  // Show red LEDs gradually brightening during recording period
+  while (millis() - startTime < COLOR_RECORDING_DURATION) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastLEDUpdate >= LED_UPDATE_INTERVAL) {
+      unsigned long elapsed = currentTime - startTime;
+      int progress = (elapsed * NUM_LEDS) / COLOR_RECORDING_DURATION;
+      progress = constrain(progress, 0, NUM_LEDS);
+      updateLEDs(RECORDING, progress);
+      lastLEDUpdate = currentTime;
+    }
+  }
+
+  // NOW capture the color at the end of recording period
   uint8_t red, green, blue;
 
   #if TEST_MODE
@@ -567,6 +652,23 @@ void captureColor() {
     blue = map(b, 0, 65535, 0, 255);
   #endif
 
+  Serial.print("Color captured: ");
+  Serial.print(red);
+  Serial.print(",");
+  Serial.print(green);
+  Serial.print(",");
+  Serial.println(blue);
+
+    // Create a blink effect: turn off briefly, then show color
+  strip.clear();
+  strip.show();
+  delay(200);  // Brief off period
+
+  // Show the captured color briefly at full brightness
+  strip.fill(strip.Color(red, green, blue));
+  strip.show();
+  delay(500);  // Hold at full brightness briefly
+
   // Save to SD card
   File colorFile = SD.open("/color.dat", FILE_WRITE);
   if (!colorFile) {
@@ -583,12 +685,7 @@ void captureColor() {
   colorFile.close();
 
   hasColor = true;
-  Serial.print("Color captured: ");
-  Serial.print(red);
-  Serial.print(",");
-  Serial.print(green);
-  Serial.print(",");
-  Serial.println(blue);
+  Serial.println("[DEBUG] hasColor flag set to TRUE");
 }
 
 void transferData() {
@@ -691,8 +788,10 @@ void handleTransferFailure() {
   }
 
   if (wifiFailCount >= 3) {
-    Serial.println("3 transfer failures, entering ERROR state");
-    enterErrorState();
+    Serial.println("3 transfer failures, clearing memory and resetting to IDLE");
+    wifiFailCount = 0;  // Reset the failure count
+    clearMemory();
+    currentState = IDLE;
   } else {
     Serial.println("Transfer failed, returning to READY state");
     currentState = READY;
@@ -766,9 +865,17 @@ void updateLEDs(State state, int progress) {
 
     case RECORDING:
       // All LEDs in ring increase in brightness based on recording progress
-      // Map progress (0-15) to brightness (0-255)
+      // Use gradual brightness curve starting from very dim (5) to full (255)
       {
-        int brightness = map(progress, 0, NUM_LEDS, 0, 255);
+        // Calculate normalized progress (0.0 to 1.0)
+        float normalizedProgress = (float)progress / NUM_LEDS;
+
+        // Apply quadratic curve for smoother, more gradual increase
+        float curve = normalizedProgress * normalizedProgress;
+
+        // Map to brightness range: 5 (very dim start) to 255 (full brightness)
+        int brightness = 5 + (curve * 250);
+
         if (selectedSensor == AUDIO) {
           strip.fill(strip.Color(0, 0, brightness));  // Blue for audio, increasing brightness
         } else {
