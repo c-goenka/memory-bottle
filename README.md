@@ -42,8 +42,8 @@ Configure WiFi credentials and upload sketches (see Setup below).
 | Dim white | IDLE | Ready to record |
 | Blue solid | SELECTING | Microphone selected |
 | Red solid | SELECTING | Color sensor selected |
-| Blue brightening | RECORDING | Recording audio (15s) |
-| Red brightening | RECORDING | Recording color (8s) |
+| Blue brightening | RECORDING | Recording audio |
+| Red brightening | RECORDING | Recording color |
 | Yellow pulsing | INCOMPLETE | 1 of 2 recordings complete |
 | Green solid | READY | Both recordings done, ready to pour |
 | Cyan pulsing | TRANSFERRING | Uploading via WiFi |
@@ -90,7 +90,7 @@ Server runs on port 8080 and auto-detects the UNO R4.
 ### Recording
 
 1. **Rotate potentiometer** → LED turns blue (mic) or red (color sensor)
-2. **Open cap** → Recording starts (forced duration: 15s audio, 8s color)
+2. **Open cap** → Recording starts using selected sensor
 3. Recording completes automatically:
    - Yellow pulse = need to record with other sensor
    - Green solid = ready to pour
