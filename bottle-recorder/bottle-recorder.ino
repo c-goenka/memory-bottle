@@ -22,11 +22,16 @@
 // Configuration
 #define NUM_LEDS 7
 #define RECORDING_DURATION 15000  // 15 seconds in ms
+#define COLOR_RECORDING_DURATION 8000  // 8 seconds for color capture
 #define SAMPLE_RATE 16000
 #define DEBOUNCE_TIME 100
 #define TILT_STABLE_TIME 100
 #define WIFI_TIMEOUT 30000
 #define POT_READ_INTERVAL 100
+#define POT_THRESHOLD 150  // Minimum change to trigger sensor selection
+#define POT_MIDPOINT 2048  // ESP32 12-bit ADC midpoint (0-4095)
+#define SELECTING_TIMEOUT 5000  // Time before returning to IDLE
+#define LED_UPDATE_INTERVAL 100  // LED update rate during recording
 
 // Test Mode - Set to true to enable serial command simulation
 #define TEST_MODE false  // Set to false to use real sensors
@@ -154,22 +159,12 @@ void loop() {
   #else
     // Read inputs with debouncing
     readButtonState();
-    readTiltState();  // Re-enabled tilt sensor
+    readTiltState();
 
     // Read potentiometer periodically
     if (millis() - lastPotRead > POT_READ_INTERVAL) {
       readSensorSelection();
       lastPotRead = millis();
-    }
-
-    // Debug: Print tilt sensor status periodically
-    static unsigned long lastTiltPrint = 0;
-    if (millis() - lastTiltPrint > 1000) {  // Print every 1 second
-      Serial.print("[TILT] State: ");
-      Serial.print(tiltState == LOW ? "TILTED" : "UPRIGHT");
-      Serial.print(" | Stable: ");
-      Serial.println(stableTilt ? "YES" : "NO");
-      lastTiltPrint = millis();
     }
   #endif
 
@@ -243,8 +238,7 @@ void readTiltState() {
 SensorType readSensorSelection() {
   int potValue = analogRead(POT_PIN);
 
-  // ESP32 has 12-bit ADC (0-4095), so we scale the thresholds
-  if (potValue < 2048) {
+  if (potValue < POT_MIDPOINT) {
     selectedSensor = AUDIO;
   } else {
     selectedSensor = COLOR;
@@ -286,48 +280,26 @@ void handleIdleState() {
   updateLEDs(IDLE, 0);
 
   // Check for potentiometer rotation to enter SELECTING
-  static int lastPotValue = -1;  // -1 means uninitialized
-  static bool firstRun = true;
+  static int lastPotValue = -1;
   int potValue = analogRead(POT_PIN);
 
-  // Initialize lastPotValue on first run
-  if (firstRun) {
+  if (lastPotValue == -1) {
     lastPotValue = potValue;
-    firstRun = false;
-    Serial.print("Initial pot value: ");
-    Serial.println(potValue);
   }
 
-  // Debug: Print pot change periodically
-  static unsigned long lastDebugPrint = 0;
-  if (millis() - lastDebugPrint > 500) {
-    int diff = abs(potValue - lastPotValue);
-    Serial.print("[POT DEBUG] Current: ");
-    Serial.print(potValue);
-    Serial.print(" | Last: ");
-    Serial.print(lastPotValue);
-    Serial.print(" | Diff: ");
-    Serial.println(diff);
-    lastDebugPrint = millis();
-  }
-
-  if (abs(potValue - lastPotValue) > 150) {  // Reduced threshold for better sensitivity
-    lastPotValue = potValue;  // Update ONLY when threshold is met
+  if (abs(potValue - lastPotValue) > POT_THRESHOLD) {
+    lastPotValue = potValue;
     currentState = SELECTING;
-    selectingStartTime = millis();  // Reset the timer when entering SELECTING
-    Serial.println("State: SELECTING");
-    readSensorSelection();  // Update selected sensor
-    Serial.print("Selected: ");
+    selectingStartTime = millis();
+    readSensorSelection();
+    Serial.print("State: SELECTING (");
     Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
-    Serial.print(" (pot value: ");
-    Serial.print(potValue);
     Serial.println(")");
   }
 
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
-    return;  // CRITICAL: Return immediately to prevent state from being overridden
   }
 }
 
@@ -337,94 +309,69 @@ void handleSelectingState() {
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
-    return;  // CRITICAL: Return immediately to prevent state from being overridden
+    return;
   }
 
   // Return to IDLE if no activity for a while
-  if (millis() - selectingStartTime > 5000) {
+  if (millis() - selectingStartTime > SELECTING_TIMEOUT) {
     currentState = IDLE;
-    Serial.println("State: IDLE (timeout from selecting)");
+    Serial.println("State: IDLE (timeout)");
+    return;
   }
 
   // Reset timer if potentiometer is being adjusted
-  static int lastPotValue = -1;  // Initialize to -1
-  static bool firstPotRead = true;
+  static int lastPotValue = -1;
   static SensorType lastSelectedSensor = selectedSensor;
   int potValue = analogRead(POT_PIN);
 
-  // Initialize on first read
-  if (firstPotRead) {
+  if (lastPotValue == -1) {
     lastPotValue = potValue;
-    firstPotRead = false;
   }
 
-  if (abs(potValue - lastPotValue) > 150) {  // Match IDLE threshold
-    lastPotValue = potValue;  // Update ONLY when threshold is met
+  if (abs(potValue - lastPotValue) > POT_THRESHOLD) {
+    lastPotValue = potValue;
     selectingStartTime = millis();
+    readSensorSelection();
 
-    // Check if sensor selection changed
-    readSensorSelection();  // Update selected sensor
     if (selectedSensor != lastSelectedSensor) {
       Serial.print("Selected: ");
-      Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
-      Serial.print(" (pot value: ");
-      Serial.print(potValue);
-      Serial.println(")");
+      Serial.println(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
       lastSelectedSensor = selectedSensor;
     }
   }
 }
 
 void handleRecordingState() {
-  unsigned long elapsed = millis() - recordingStartTime;
-  int progress = (elapsed * NUM_LEDS) / RECORDING_DURATION;
-  progress = constrain(progress, 0, NUM_LEDS);
-
-  updateLEDs(RECORDING, progress);
-
-  // Check if cap is put back on (end recording)
-  if (capJustClosed()) {
-    stopRecording();
-    return;
-  }
-
-  // Auto-stop after 15 seconds
-  if (elapsed >= RECORDING_DURATION) {
-    stopRecording();
-  }
+  // NOTE: This handler is not typically reached during recording because
+  // recordAudio() and captureColor() are blocking functions.
+  // State transitions happen in startRecording() after recording completes.
+  updateLEDs(RECORDING, 0);
 }
 
 void handleIncompleteState() {
   updateLEDs(INCOMPLETE, 0);
 
   // Check for potentiometer rotation to enter SELECTING
-  static int lastPotValue = -1;  // -1 means uninitialized
-  static bool firstRun = true;
+  static int lastPotValue = -1;
   int potValue = analogRead(POT_PIN);
 
-  // Initialize lastPotValue on first run
-  if (firstRun) {
+  if (lastPotValue == -1) {
     lastPotValue = potValue;
-    firstRun = false;
   }
 
-  if (abs(potValue - lastPotValue) > 150) {  // Reduced threshold for better sensitivity
-    lastPotValue = potValue;  // Update ONLY when threshold is met
+  if (abs(potValue - lastPotValue) > POT_THRESHOLD) {
+    lastPotValue = potValue;
     currentState = SELECTING;
-    selectingStartTime = millis();  // Reset the timer when entering SELECTING
-    Serial.println("State: SELECTING");
-    readSensorSelection();  // Update selected sensor
-    Serial.print("Selected: ");
+    selectingStartTime = millis();
+    readSensorSelection();
+    Serial.print("State: SELECTING (");
     Serial.print(selectedSensor == AUDIO ? "MICROPHONE" : "COLOR SENSOR");
-    Serial.print(" (pot value: ");
-    Serial.print(potValue);
     Serial.println(")");
   }
 
   // Check for cap being removed to start recording
   if (capJustOpened()) {
     startRecording();
-    return;  // CRITICAL: Return immediately to prevent state from being overridden
   }
 }
 
@@ -444,65 +391,23 @@ void handleTransferringState() {
 }
 
 void startRecording() {
-  // Set global state so updateLEDs knows which color to use
   currentState = RECORDING;
 
-  Serial.print("Started recording: ");
+  Serial.print("Recording ");
   Serial.println(selectedSensor == AUDIO ? "AUDIO" : "COLOR");
 
   if (selectedSensor == AUDIO) {
-    // RUN AUDIO RECORDING NOW (Blocks until finished)
     recordAudio();
   } else {
-    // Capture color immediately
     captureColor();
   }
 
-  // When recording finishes (cap closed or time up), calculate next state immediately
-  Serial.print("[DEBUG] After recording - hasAudio: ");
-  Serial.print(hasAudio);
-  Serial.print(", hasColor: ");
-  Serial.println(hasColor);
-
-  int count = getRecordingCount();
-  Serial.print("[DEBUG] Recording count: ");
-  Serial.println(count);
-
-  if (count == 1) {
-    currentState = INCOMPLETE;
-    Serial.println("State: INCOMPLETE");
-  } else if (count == 2) {
-    currentState = READY;
-    Serial.println("State: READY");
-  } else {
-    currentState = IDLE;
-    Serial.println("State: IDLE");
-  }
-
-  saveRecordingStatus();
-}
-
-
-void stopRecording() {
-  // NOTE: This function is currently dead code because recordAudio() and captureColor()
-  // block for their full duration, so handleRecordingState() never runs during recording.
-  // State transitions happen in startRecording() after the blocking calls complete.
-
-  Serial.println("[WARNING] stopRecording() called - this shouldn't happen with blocking recording!");
-
   // Determine next state based on recording count
-  Serial.print("[DEBUG] stopRecording - hasAudio: ");
-  Serial.print(hasAudio);
-  Serial.print(", hasColor: ");
-  Serial.println(hasColor);
-
   int count = getRecordingCount();
-  Serial.print("[DEBUG] Recording count: ");
-  Serial.println(count);
 
   if (count == 1) {
     currentState = INCOMPLETE;
-    Serial.println("State: INCOMPLETE");
+    Serial.println("State: INCOMPLETE (need 1 more)");
   } else if (count == 2) {
     currentState = READY;
     Serial.println("State: READY");
@@ -513,7 +418,6 @@ void stopRecording() {
 
   saveRecordingStatus();
 }
-
 
 void recordAudio() {
   SD.remove("/audio.wav");
@@ -524,11 +428,8 @@ void recordAudio() {
     return;
   }
 
-  // Platzhalter Header
-  writeWAVHeader(audioFile, 0);
-
-  Serial.println("--- FORCED 15s RECORDING ---");
-  Serial.println("Recording will NOT stop if cap is closed.");
+  writeWAVHeader(audioFile, 0);  // Placeholder header
+  Serial.println("Recording audio (15s)...");
 
   const int bufferSize = 4096;
   static uint8_t buffer[bufferSize];
@@ -538,15 +439,11 @@ void recordAudio() {
   unsigned long sampleInterval = 1000000 / SAMPLE_RATE;
   unsigned long nextSample = micros();
   unsigned long totalBytesWritten = 0;
-
-  // LED update tracking
   unsigned long lastLEDUpdate = 0;
-  const int LED_UPDATE_INTERVAL = 100;  // Update LEDs every 100ms
 
-  // Schleife läuft strikt solange die Zeit < 15000ms ist
+  // Record for full duration
   while (millis() - startTime < RECORDING_DURATION) {
-
-    // Update LEDs to show recording progress
+    // Update LEDs to show progress
     unsigned long currentTime = millis();
     if (currentTime - lastLEDUpdate >= LED_UPDATE_INTERVAL) {
       unsigned long elapsed = currentTime - startTime;
@@ -556,14 +453,7 @@ void recordAudio() {
       lastLEDUpdate = currentTime;
     }
 
-    // HIER WURDE DER STOPP-CODE ENTFERNT
-    // Wir lesen den Knopf nur zu Debug-Zwecken, brechen aber NICHT ab.
-    if (millis() % 1000 == 0) { // Jede Sekunde einmal Status drucken
-       int btn = digitalRead(BUTTON_PIN);
-       Serial.print("Recording... Button State: ");
-       Serial.println(btn); // 1 oder 0
-    }
-
+    // Sample audio
     if (micros() >= nextSample) {
       int sample = analogRead(MIC_PIN);
       int16_t sample16 = (sample - 2048) * 16;
@@ -583,44 +473,40 @@ void recordAudio() {
     }
   }
 
-  // Restliche Daten schreiben
+  // Write remaining buffer data
   if (bufferIndex > 0) {
     audioFile.write(buffer, bufferIndex);
     totalBytesWritten += bufferIndex;
   }
 
-  Serial.print("Recording Finished. Total Bytes: ");
-  Serial.println(totalBytesWritten);
+  Serial.print("Audio recorded: ");
+  Serial.print(totalBytesWritten);
+  Serial.println(" bytes");
 
-  // Create a blink effect: turn off briefly, then show blue
+  // Completion blink effect
   strip.clear();
   strip.show();
-  delay(200);  // Brief off period
-
+  delay(200);
   strip.fill(strip.Color(0, 0, 255));
   strip.show();
-  delay(500);  // Hold at full brightness briefly
+  delay(500);
 
-  // Header updaten
+  // Update WAV header with actual size
   audioFile.seek(0);
   writeWAVHeader(audioFile, totalBytesWritten);
   audioFile.close();
 
   hasAudio = true;
-  Serial.println("[DEBUG] hasAudio flag set to TRUE");
 }
 
 
 void captureColor() {
-  Serial.println("--- COLOR RECORDING (8 seconds) ---");
+  Serial.println("Recording color (8s)...");
 
-  // LED update tracking
-  const unsigned long COLOR_RECORDING_DURATION = 8000;  // 8 seconds
-  const int LED_UPDATE_INTERVAL = 100;  // Update LEDs every 100ms
   unsigned long startTime = millis();
   unsigned long lastLEDUpdate = 0;
 
-  // Show red LEDs gradually brightening during recording period
+  // Show LEDs gradually brightening during recording period
   while (millis() - startTime < COLOR_RECORDING_DURATION) {
     unsigned long currentTime = millis();
     if (currentTime - lastLEDUpdate >= LED_UPDATE_INTERVAL) {
@@ -632,21 +518,17 @@ void captureColor() {
     }
   }
 
-  // NOW capture the color at the end of recording period
+  // Capture color at end of recording period
   uint8_t red, green, blue;
 
   #if TEST_MODE
-    // In test mode, use dummy color values
     red = 128;
     green = 64;
     blue = 200;
-    Serial.println("Using test color values (no sensor required)");
+    Serial.println("Using test color values");
   #else
-    // Real mode - read from color sensor
     uint16_t r, g, b, c;
     colorSensor.getRawData(&r, &g, &b, &c);
-
-    // Normalize to 0-255 range
     red = map(r, 0, 65535, 0, 255);
     green = map(g, 0, 65535, 0, 255);
     blue = map(b, 0, 65535, 0, 255);
@@ -659,20 +541,18 @@ void captureColor() {
   Serial.print(",");
   Serial.println(blue);
 
-    // Create a blink effect: turn off briefly, then show color
+  // Completion blink effect
   strip.clear();
   strip.show();
-  delay(200);  // Brief off period
-
-  // Show the captured color briefly at full brightness
+  delay(200);
   strip.fill(strip.Color(red, green, blue));
   strip.show();
-  delay(500);  // Hold at full brightness briefly
+  delay(500);
 
   // Save to SD card
   File colorFile = SD.open("/color.dat", FILE_WRITE);
   if (!colorFile) {
-    Serial.println("Failed to open color.dat for writing");
+    Serial.println("Failed to save color data");
     enterErrorState();
     return;
   }
@@ -685,13 +565,12 @@ void captureColor() {
   colorFile.close();
 
   hasColor = true;
-  Serial.println("[DEBUG] hasColor flag set to TRUE");
 }
 
 void transferData() {
-  // 1. Ensure WiFi Connection
+  // Ensure WiFi connection
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, attempting reconnection...");
+    Serial.println("Reconnecting WiFi...");
     WiFi.begin(ssid, password);
     unsigned long startTime = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
@@ -703,57 +582,45 @@ void transferData() {
     }
   }
 
-  // 2. Read Color Data
-  String colorString = "128,128,128"; // DEFAULT VALUE
-
+  // Read color data
+  String colorString = "128,128,128";  // Default gray
   File colorFile = SD.open("/color.dat", FILE_READ);
   if (colorFile) {
     if (colorFile.available()) {
       colorString = colorFile.readString();
-      colorString.trim(); // Remove whitespace/newlines
+      colorString.trim();
     }
     colorFile.close();
-  } else {
-    Serial.println("Warning: color.dat missing, using default gray");
   }
 
-  // SAFETY CHECK: If string is still empty, force a value
   if (colorString.length() == 0) {
     colorString = "128,128,128";
   }
 
-  // Debug Print: SEE WHAT WE ARE SENDING
-  Serial.print("Sending Color Header: [");
-  Serial.print(colorString);
-  Serial.println("]");
-
-  // 3. Open Audio File
+  // Open audio file
   File audioFile = SD.open("/audio.wav", FILE_READ);
   if (!audioFile) {
-    Serial.println("Failed to open audio.wav");
+    Serial.println("Failed to open audio file");
     handleTransferFailure();
     return;
   }
 
-  // 4. Start HTTP Request
+  // Send HTTP POST request
   HTTPClient http;
   http.begin(serverURL);
   http.setTimeout(WIFI_TIMEOUT);
-
-  // Headers
   http.addHeader("Content-Type", "audio/wav");
   http.addHeader("X-Color-Data", colorString);
 
   Serial.print("Uploading ");
   Serial.print(audioFile.size());
-  Serial.println(" bytes...");
+  Serial.print(" bytes with color ");
+  Serial.println(colorString);
 
-  // 5. STREAM the audio file
   int httpCode = http.sendRequest("POST", &audioFile, audioFile.size());
-
   audioFile.close();
 
-  // 6. Handle Response
+  // Handle response
   if (httpCode == 200) {
     Serial.println("Transfer successful!");
     wifiFailCount = 0;
@@ -764,8 +631,7 @@ void transferData() {
     Serial.print("Transfer failed, code: ");
     Serial.println(httpCode);
     if (httpCode > 0) {
-      String response = http.getString();
-      Serial.println(response);
+      Serial.println(http.getString());
     }
     handleTransferFailure();
   }

@@ -8,62 +8,46 @@ Audio and color recording system with WiFi playback.
 git clone https://github.com/YOUR_USERNAME/memory-bottle.git
 cd memory-bottle
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Then configure WiFi and upload sketches (see Setup below).
+Configure WiFi credentials and upload sketches (see Setup below).
 
 ## System Components
 
-1. **Nano ESP32** (in bottle) - Records audio/color to SD card
-2. **Python Server** (laptop) - Receives files via WiFi, plays audio
+1. **ESP32 Nano** (in bottle) - Records audio/color to SD card
+2. **Flask Server** (laptop) - Receives files via WiFi, plays audio
 3. **UNO R4 Minima** (laptop) - Displays color on LED ring
-
-## Files
-
-```
-memory-bottle/
-├── bottle-recorder/bottle-recorder.ino    # Nano ESP32 main
-├── bottle-playback/bottle-playback.ino    # UNO R4 main
-├── bottle-server.py                       # Flask server
-├── debug-sketches/                        # Hardware testing
-│   ├── debug-nano-esp32.ino              #   Test ESP32 sensors
-│   └── debug-uno-r4.ino                  #   Test UNO R4
-├── debug-system.py                        # System testing
-├── DEBUG-GUIDE.md                         # Full debug reference
-├── requirements.txt
-└── README.md
-```
 
 ## Hardware Wiring
 
-### Nano ESP32 (Recorder)
+### ESP32 Nano (Recorder)
 - **A0** → MAX9814 Microphone
-- **A1** → 10kΩ Potentiometer (sensor selector)
-- **D2** → Push Button (cap sensor, INPUT_PULLUP)
-- **D3** → SW-520D Tilt Sensor (INPUT_PULLUP)
-- **D6** → NeoPixel LED Ring (15 LEDs)
+- **A2** → 10kΩ Potentiometer (sensor selector)
+- **D7** → Capacitive Touch Button (cap sensor, INPUT_PULLUP)
+- **D2** → SW-520D Tilt Sensor (INPUT_PULLUP, inverted)
+- **D5** → NeoPixel LED Ring (7 LEDs)
 - **D10** → SD Card CS
 - **SDA/SCL** → TCS34725 Color Sensor (with 3.3V level shifter)
 
-### UNO R4 Minima (Color Display)
-- **D6** → NeoPixel LED Ring (15 LEDs)
-- **USB** → Serial connection to laptop
+### UNO R4 Minima (Display)
+- **D5** → NeoPixel LED Ring (85 LEDs)
+- **USB** → Serial to laptop (115200 baud)
 
-## LED Status (State Debugging)
+## LED Status
 
-| LED Color/Pattern | State | Meaning |
-|-------------------|-------|---------|
-| Dim white | IDLE | No recordings, ready to start |
-| **Blue** solid | SELECTING | Microphone selected |
-| **Red** solid | SELECTING | Color sensor selected |
-| **Blue** brightening | RECORDING | Recording audio (0-255 over 15s) |
-| **Red** brightening | RECORDING | Sampling color |
-| **Yellow** pulsing | INCOMPLETE | 1 of 2 recordings done |
-| **Green** solid | READY | 2 recordings done, ready to pour |
-| **Cyan** pulsing | TRANSFERRING | Uploading to WiFi |
-| **Red** blinking | ERROR | SD/WiFi failure |
+| Color/Pattern | State | Meaning |
+|---------------|-------|---------|
+| Dim white | IDLE | Ready to record |
+| Blue solid | SELECTING | Microphone selected |
+| Red solid | SELECTING | Color sensor selected |
+| Blue brightening | RECORDING | Recording audio (15s) |
+| Red brightening | RECORDING | Recording color (8s) |
+| Yellow pulsing | INCOMPLETE | 1 of 2 recordings complete |
+| Green solid | READY | Both recordings done, ready to pour |
+| Cyan pulsing | TRANSFERRING | Uploading via WiFi |
+| Red blinking | ERROR | Hardware failure |
 
 ## Setup
 
@@ -75,12 +59,12 @@ Via Arduino IDE Library Manager:
 
 ### 2. Configure WiFi
 
-Edit `bottle-recorder/bottle-recorder.ino` lines 32-34:
+Edit [bottle-recorder.ino:40-42](bottle-recorder/bottle-recorder.ino#L40-L42):
 
 ```cpp
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://YOUR_LAPTOP_IP:5000/upload";
+const char* serverURL = "http://YOUR_LAPTOP_IP:8080/upload";
 ```
 
 **Find your laptop IP:**
@@ -89,34 +73,34 @@ const char* serverURL = "http://YOUR_LAPTOP_IP:5000/upload";
 
 ### 3. Upload Sketches
 
-1. Upload `bottle-recorder.ino` to **Nano ESP32**
+1. Upload `bottle-recorder.ino` to **ESP32 Nano**
 2. Upload `bottle-playback.ino` to **UNO R4 Minima**
 
 ### 4. Start Server
 
 ```bash
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 python bottle-server.py
 ```
 
-Server displays local IP - update ESP32 sketch if needed.
+Server runs on port 8080 and auto-detects the UNO R4.
 
 ## Usage
 
 ### Recording
 
-1. **Rotate potentiometer** → Blue (mic) or Red (color sensor)
-2. **Open cap** → Recording starts, LED brightness increases
-3. **Close cap** → Recording saves
-   - Yellow pulse = need other sensor
+1. **Rotate potentiometer** → LED turns blue (mic) or red (color sensor)
+2. **Open cap** → Recording starts (forced duration: 15s audio, 8s color)
+3. Recording completes automatically:
+   - Yellow pulse = need to record with other sensor
    - Green solid = ready to pour
-4. **Repeat** for second sensor
+4. **Repeat** to record with the other sensor
 
 ### Playback
 
-**Open cap + tilt bottle** (when green) → Transfers via WiFi, plays audio on laptop, displays color on UNO R4
+**Open cap + tilt bottle** (when LED is green) → WiFi transfer, audio plays on laptop, color displays on LED ring
 
-After playback, memory clears and returns to IDLE (dim white).
+After playback, memory clears and returns to IDLE.
 
 ## State Machine
 
@@ -125,73 +109,90 @@ IDLE (dim white)
   ↓ rotate pot
 SELECTING (blue/red)
   ↓ open cap
-RECORDING (brightening)
-  ↓ close cap
-INCOMPLETE (yellow pulse) or READY (green)
-  ↓ open + tilt (if ready)
-TRANSFERRING (cyan pulse)
+RECORDING (brightening, forced duration)
+  ↓ auto-complete
+INCOMPLETE (yellow) or READY (green)
+  ↓ open + tilt (when ready)
+TRANSFERRING (cyan)
   ↓ success
-IDLE (memory cleared)
+IDLE (cleared)
 ```
 
-## Error States
+## Error Handling
 
-**3 yellow blinks** - Tried to pour with < 2 recordings
-**3 red blinks** - WiFi transfer failed (can retry)
-**5 red blinks** - SD card failure (requires reset)
-**Red blinking** - Persistent ERROR state
+**3 yellow blinks** - Attempted pour with incomplete recordings
+**3 red blinks** - WiFi transfer failed (auto-retry, 3 max attempts)
+**5 red blinks** - Hardware initialization failure (SD/color sensor)
+**Red blinking** - Persistent error state (requires power cycle)
 
 ## Technical Specs
 
-**Audio:** 16kHz, 16-bit PCM, mono WAV (15s max) - plays through laptop speakers via pygame
-**Color:** RGB text file, format `R,G,B` (0-255) - displays on UNO R4 LED ring
-**WiFi:** HTTP POST multipart/form-data, 30s timeout
-**Timing:** 50ms debounce, 100ms tilt stabilization
+**Audio:** 16kHz, 16-bit PCM mono WAV, 15 seconds (forced duration)
+**Color:** RGB format `R,G,B` (0-255), captured after 8 second recording period
+**WiFi:** HTTP POST with `X-Color-Data` header, 30s timeout
+**Timing:** 100ms debounce, 100ms tilt stabilization, 150 ADC threshold
+
+## Configuration Constants
+
+All timing and threshold values are defined as constants at the top of each file:
+
+**bottle-recorder.ino:**
+- `RECORDING_DURATION` (15000ms)
+- `COLOR_RECORDING_DURATION` (8000ms)
+- `POT_THRESHOLD` (150)
+- `POT_MIDPOINT` (2048)
+- `SELECTING_TIMEOUT` (5000ms)
+
+**bottle-server.py:**
+- `SAMPLE_RATE` (16000)
+- `COLOR_REQUEST_TIMEOUT` (5s)
+- `DEFAULT_COLOR` ("128,128,128")
+
+**bottle-playback.ino:**
+- `WAVE_SPEED` (50ms)
+- `WAVE_LENGTH` (15 LEDs)
+- `AUTO_RESET_DELAY` (60s)
 
 ## Debugging
 
-**Quick Start:** Run `python debug-system.py` to test everything
+### Quick Test
+```bash
+python debug-system.py
+```
 
-**Test Mode:** See [TEST-MODE-GUIDE.md](TEST-MODE-GUIDE.md) to test the full system without sensors (using Serial commands)
+### Test Mode
+Set `TEST_MODE` to `true` in [bottle-recorder.ino:37](bottle-recorder/bottle-recorder.ino#L37) to simulate sensors via Serial commands.
 
-**Full Guide:** See [DEBUG-GUIDE.md](DEBUG-GUIDE.md) for detailed troubleshooting
-
-### Debug Scripts
-
-**1. System Check:** `python debug-system.py`
-- Tests Python, network, serial, files, WiFi config
-
-**2. ESP32 Hardware:** Upload `debug-sketches/debug-nano-esp32.ino` (Serial: 115200)
-- Tests all sensors: LEDs, button, tilt, pot, mic, color, SD, WiFi
-
-**3. UNO R4 Hardware:** Upload `debug-sketches/debug-uno-r4.ino` (Serial: 115200)
-- Tests LEDs, serial, color display protocol
+### Debug Sketches
+- `debug-sketches/debug-nano-esp32.ino` - Test ESP32 sensors
+- `debug-sketches/debug-uno-r4.ino` - Test UNO R4 LEDs
 
 ### Common Issues
 
-**WiFi won't connect** - Use 2.4GHz network, check credentials
-**SD card error** - Format as FAT32, check SPI wiring
-**No audio playback** - Check laptop speakers, verify pygame installed (`pip install pygame`)
-**Server can't find Arduino** - Check USB connection, set `SERIAL_PORT` manually in script
-**Color sensor fails** - Verify I2C + level shifter, test with bright colors
-**LEDs not working** - Check power, verify D6 connection, test with debug sketch
+**WiFi won't connect** - Use 2.4GHz network, verify credentials
+**SD card error** - Format as FAT32, check wiring
+**No audio** - Check laptop volume, verify pygame installed
+**Arduino not found** - Check USB connection, verify port
+**Color sensor fails** - Check I2C connections and level shifter
 
 ## Sensor Selection
 
-Potentiometer reads ESP32's 12-bit ADC (0-4095):
-- **0-2047** = Microphone (blue LED)
-- **2048-4095** = Color sensor (red LED)
+Potentiometer uses ESP32's 12-bit ADC (0-4095):
+- **< 2048** = Microphone (blue LED)
+- **≥ 2048** = Color sensor (red LED)
 
-## Valid Actions
+Threshold of 150 ADC units prevents false triggers from noise.
 
-- Open cap (IDLE/INCOMPLETE) → start recording
-- Close cap (RECORDING) → save recording
-- Rotate pot (cap closed) → change sensor
-- Open + tilt (READY, 2 recordings) → transfer/play
+## Project Structure
 
-## Ignored Actions
-
-- Tilt during recording
-- Open + tilt with < 2 recordings (shows warning)
-- Rotate pot during recording
-- Record same sensor twice (overwrites previous)
+```
+memory-bottle/
+├── bottle-recorder/
+│   └── bottle-recorder.ino          # ESP32 firmware (~970 lines)
+├── bottle-playback/
+│   └── bottle-playback.ino          # UNO R4 firmware (~380 lines)
+├── bottle-server.py                 # Flask server (~218 lines)
+├── debug-sketches/                  # Hardware testing tools
+├── requirements.txt
+└── README.md
+```

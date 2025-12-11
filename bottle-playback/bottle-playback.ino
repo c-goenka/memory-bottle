@@ -3,140 +3,112 @@
 #include <avr/power.h>
 #endif
 
+// Configuration
+#define PIN        D5
+#define NUMPIXELS  85
 
-// --- CONFIGURATION ---
-#define PIN        D5     // Arduino pin connected to NeoPixels
-#define NUMPIXELS  85     // How many NeoPixels are changing
-
+// Wave effect settings
+#define WAVE_SPEED 50       // milliseconds between updates
+#define WAVE_LENGTH 15      // LEDs in wave trail
+#define FADE_SPEED 0.01     // Fade-in speed (1% per frame)
+#define MIN_BRIGHTNESS 0.2  // Minimum brightness (20%)
+#define MAX_BRIGHTNESS 1.0  // Maximum brightness (100%)
+#define AUTO_RESET_DELAY 60000  // Auto-reset to white after 60s
 
 Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
-// Wave effect variables
-uint32_t currentColor = pixels.Color(0, 255, 255); // Default cyan
+// State variables
+uint32_t currentColor = pixels.Color(0, 255, 255);  // Default cyan
+uint32_t defaultColor = pixels.Color(255, 255, 255);  // White
 int wavePosition = 0;
 unsigned long lastUpdate = 0;
-int waveSpeed = 50; // milliseconds between updates (lower = faster)
-int waveLength = 15; // how many LEDs in the wave trail
-
-// Fade-in effect variables
-float fadeInMultiplier = 0.0; // Start at 0 (off)
-bool fadingIn = true;
-float fadeInSpeed = 0.01; // How fast to fade in (0.01 = 1% per frame)
-
-// Auto-reset to white variables
 unsigned long lastKeypressTime = 0;
-unsigned long resetDelay = 60000; // 60 seconds in milliseconds
-uint32_t defaultColor = pixels.Color(255, 255, 255); // White
+float fadeInMultiplier = 0.0;
+bool fadingIn = true;
 
 void setup() {
- #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
-   clock_prescale_set(clock_div_1);
- #endif
+  #if defined(__AVR_ATtiny85__) && (F_CPU == 16000000)
+    clock_prescale_set(clock_div_1);
+  #endif
 
-
- pixels.begin(); // Initialize NeoPixel strip
- pixels.show();  // Initialize all pixels to 'off'
-  // Start the Serial Monitor so we can read keypresses
- Serial.begin(9600);
- Serial.println("System Ready: Enter numbers 1-9 or 0 to change colors.");
+  pixels.begin();
+  pixels.show();
+  Serial.begin(9600);
+  Serial.println("Ready: Enter 1-9 or 0 to change colors");
 }
 
-
 void loop() {
- // Check if data is coming from the Serial Monitor
- if (Serial.available() > 0) {
+  // Handle serial color selection
+  if (Serial.available() > 0) {
+    char key = Serial.read();
+    uint32_t selectedColor = 0;
+    bool validKey = true;
 
-   // Read the key pressed
-   char key = Serial.read();
+    switch (key) {
+      case '1': selectedColor = pixels.Color(255, 0, 0); break;     // Red
+      case '2': selectedColor = pixels.Color(255, 128, 0); break;   // Orange
+      case '3': selectedColor = pixels.Color(255, 255, 0); break;   // Yellow
+      case '4': selectedColor = pixels.Color(0, 255, 0); break;     // Green
+      case '5': selectedColor = pixels.Color(0, 255, 255); break;   // Cyan
+      case '6': selectedColor = pixels.Color(0, 0, 255); break;     // Blue
+      case '7': selectedColor = pixels.Color(128, 0, 255); break;   // Purple
+      case '8': selectedColor = pixels.Color(255, 0, 128); break;   // Pink
+      case '9': selectedColor = pixels.Color(255, 255, 255); break; // White
+      case '0': selectedColor = pixels.Color(50, 50, 50); break;    // Dim White
+      default: validKey = false; break;
+    }
 
-   // Create a variable to hold the chosen color
-   uint32_t selectedColor = 0;
-   bool validKey = true; // Flag to check if a valid number was pressed
+    if (validKey) {
+      currentColor = selectedColor;
+      fadeInMultiplier = 0.0;
+      fadingIn = true;
+      lastKeypressTime = millis();
+      Serial.print("Color: ");
+      Serial.println(key);
+    }
+  }
 
+  // Auto-reset to white after timeout
+  if (lastKeypressTime > 0 && (millis() - lastKeypressTime >= AUTO_RESET_DELAY)) {
+    currentColor = defaultColor;
+    fadeInMultiplier = 0.0;
+    fadingIn = true;
+    lastKeypressTime = 0;
+    Serial.println("Auto-reset to white");
+  }
 
-   // Assign color based on keypress
-   switch (key) {
-     case '1': selectedColor = pixels.Color(255, 0, 0); break;   // Red
-     case '2': selectedColor = pixels.Color(255, 128, 0); break; // Orange
-     case '3': selectedColor = pixels.Color(255, 255, 0); break; // Yellow
-     case '4': selectedColor = pixels.Color(0, 255, 0); break;   // Green
-     case '5': selectedColor = pixels.Color(0, 255, 255); break; // Cyan
-     case '6': selectedColor = pixels.Color(0, 0, 255); break;   // Blue
-     case '7': selectedColor = pixels.Color(128, 0, 255); break; // Purple
-     case '8': selectedColor = pixels.Color(255, 0, 128); break; // Pink
-     case '9': selectedColor = pixels.Color(255, 255, 255); break; // White (Bright)
-     case '0': selectedColor = pixels.Color(50, 50, 50); break;  // Dim White (Option 10)
-     default:
-       // If they press a letter or space, ignore it
-       validKey = false;
-       break;
-   }
+  // Wave effect animation
+  unsigned long currentTime = millis();
+  if (currentTime - lastUpdate >= WAVE_SPEED) {
+    lastUpdate = currentTime;
 
+    // Fade in on startup
+    if (fadingIn) {
+      fadeInMultiplier += FADE_SPEED;
+      if (fadeInMultiplier >= MAX_BRIGHTNESS) {
+        fadeInMultiplier = MAX_BRIGHTNESS;
+        fadingIn = false;
+      }
+    }
 
-   // Only update the color if a valid number key was pressed
-   if (validKey) {
-     currentColor = selectedColor;
-     // Reset fade-in effect on every keypress
-     fadeInMultiplier = 0.0;
-     fadingIn = true;
-     // Record the time of this keypress
-     lastKeypressTime = millis();
-     Serial.print("Changed color to mode: ");
-     Serial.println(key);
-   }
- }
+    // Extract RGB components
+    uint8_t r = (currentColor >> 16) & 0xFF;
+    uint8_t g = (currentColor >> 8) & 0xFF;
+    uint8_t b = currentColor & 0xFF;
 
- // Check if 60 seconds have passed since last keypress
- if (lastKeypressTime > 0 && (millis() - lastKeypressTime >= resetDelay)) {
-   // Reset to white
-   currentColor = defaultColor;
-   fadeInMultiplier = 0.0;
-   fadingIn = true;
-   lastKeypressTime = 0; // Reset timer to prevent repeated triggers
-   Serial.println("Auto-reset to white after 60 seconds");
- }
+    // Apply wave pattern to all LEDs
+    for (int i = 0; i < NUMPIXELS; i++) {
+      float angle = (i + wavePosition) * 2.0 * PI / WAVE_LENGTH;
+      float brightness = (sin(angle) + 1.0) / 2.0;
+      brightness = MIN_BRIGHTNESS + (brightness * (MAX_BRIGHTNESS - MIN_BRIGHTNESS));
+      brightness *= fadeInMultiplier;
 
- // Wave effect animation (runs continuously)
- unsigned long currentTime = millis();
- if (currentTime - lastUpdate >= waveSpeed) {
-   lastUpdate = currentTime;
+      pixels.setPixelColor(i, pixels.Color(r * brightness, g * brightness, b * brightness));
+    }
 
-   // Gradually fade in the lights on startup
-   if (fadingIn) {
-     fadeInMultiplier += fadeInSpeed;
-     if (fadeInMultiplier >= 1.0) {
-       fadeInMultiplier = 1.0;
-       fadingIn = false;
-     }
-   }
-
-   // Extract RGB components from currentColor
-   uint8_t r = (uint8_t)((currentColor >> 16) & 0xFF);
-   uint8_t g = (uint8_t)((currentColor >> 8) & 0xFF);
-   uint8_t b = (uint8_t)(currentColor & 0xFF);
-
-   // Set brightness for all LEDs using a sine wave pattern
-   for (int i = 0; i < NUMPIXELS; i++) {
-     // Calculate brightness using sine wave
-     // The wave position shifts the sine wave along the strip
-     float angle = (i + wavePosition) * 2.0 * PI / waveLength;
-     float brightness = (sin(angle) + 1.0) / 2.0; // Normalize to 0-1 range
-
-     // Apply minimum brightness so lights don't go completely off
-     brightness = 0.2 + (brightness * 0.8); // Range from 20% to 100%
-
-     // Apply fade-in multiplier
-     brightness *= fadeInMultiplier;
-
-     // Set pixel color with calculated brightness
-     pixels.setPixelColor(i, pixels.Color(r * brightness, g * brightness, b * brightness));
-   }
-
-   pixels.show();
-
-   // Move wave position forward
-   wavePosition = (wavePosition + 1) % waveLength;
- }
+    pixels.show();
+    wavePosition = (wavePosition + 1) % WAVE_LENGTH;
+  }
 }
 
 // End
