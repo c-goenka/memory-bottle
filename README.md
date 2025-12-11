@@ -5,7 +5,7 @@ Audio and color recording system with WiFi playback.
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/memory-bottle.git
+git clone https://github.com/c-goenka/memory-bottle.git
 cd memory-bottle
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
@@ -113,24 +113,10 @@ RECORDING (brightening, forced duration)
   ↓ auto-complete
 INCOMPLETE (yellow) or READY (green)
   ↓ open + tilt (when ready)
-TRANSFERRING (cyan)
+TRANSFERRING
   ↓ success
 IDLE (cleared)
 ```
-
-## Error Handling
-
-**3 yellow blinks** - Attempted pour with incomplete recordings
-**3 red blinks** - WiFi transfer failed (auto-retry, 3 max attempts)
-**5 red blinks** - Hardware initialization failure (SD/color sensor)
-**Red blinking** - Persistent error state (requires power cycle)
-
-## Technical Specs
-
-**Audio:** 16kHz, 16-bit PCM mono WAV, 15 seconds (forced duration)
-**Color:** RGB format `R,G,B` (0-255), captured after 8 second recording period
-**WiFi:** HTTP POST with `X-Color-Data` header, 30s timeout
-**Timing:** 100ms debounce, 100ms tilt stabilization, 150 ADC threshold
 
 ## Configuration Constants
 
@@ -167,31 +153,15 @@ Set `TEST_MODE` to `true` in [bottle-recorder.ino:37](bottle-recorder/bottle-rec
 - `debug-sketches/debug-nano-esp32.ino` - Test ESP32 sensors
 - `debug-sketches/debug-uno-r4.ino` - Test UNO R4 LEDs
 
-### Common Issues
-
-**WiFi won't connect** - Use 2.4GHz network, verify credentials
-**SD card error** - Format as FAT32, check wiring
-**No audio** - Check laptop volume, verify pygame installed
-**Arduino not found** - Check USB connection, verify port
-**Color sensor fails** - Check I2C connections and level shifter
-
-## Sensor Selection
-
-Potentiometer uses ESP32's 12-bit ADC (0-4095):
-- **< 2048** = Microphone (blue LED)
-- **≥ 2048** = Color sensor (red LED)
-
-Threshold of 150 ADC units prevents false triggers from noise.
-
 ## Project Structure
 
 ```
 memory-bottle/
 ├── bottle-recorder/
-│   └── bottle-recorder.ino          # ESP32 firmware (~970 lines)
+│   └── bottle-recorder.ino          # ESP32 firmware
 ├── bottle-playback/
-│   └── bottle-playback.ino          # UNO R4 firmware (~380 lines)
-├── bottle-server.py                 # Flask server (~218 lines)
+│   └── bottle-playback.ino          # UNO R4 firmware
+├── bottle-server.py                 # Flask server
 ├── debug-sketches/                  # Hardware testing tools
 ├── requirements.txt
 └── README.md
